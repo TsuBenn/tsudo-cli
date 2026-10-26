@@ -1,10 +1,16 @@
 use std::{
-    io::{Stdout, Write, stdout},
-    os::raw::c_ushort,
+    arch::x86_64::_mm_comi_round_sd, fmt::Display, io::{Stdout, Write, stdout},
 };
 
 use crossterm::{
-    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveUp}, event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode}, style::{Attribute::{self, Bold}, Color, Print, ResetColor, SetAttribute, SetAttributes, SetBackgroundColor, SetForegroundColor, Stylize}, terminal::{self, Clear, ScrollDown, ScrollUp},
+    cursor::{self, MoveToColumn, MoveToNextLine, MoveUp},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    style::{
+        Attribute::{self},
+        Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetBackgroundColor,
+        SetForegroundColor, StyledContent, Stylize,
+    },
+    terminal::{self, Clear, ScrollUp},
 };
 
 #[derive(Debug)]
@@ -158,8 +164,8 @@ impl<'a> Text<'a> {
         self
     }
 
-    pub fn with_hint(mut self, hint: String) -> Self {
-        self.hint = Some(hint);
+    pub fn with_hint(mut self, hint: &str) -> Self {
+        self.hint = Some(hint.to_string());
         self
     }
 
@@ -168,8 +174,8 @@ impl<'a> Text<'a> {
         self
     }
 
-    pub fn with_max_suggestions(mut self, max_suggestions: usize) -> Self {
-        self.max_suggestions = Some(max_suggestions);
+    pub fn with_max_suggestions(mut self, max_suggestions: Option<usize>) -> Self {
+        self.max_suggestions = max_suggestions;
         self
     }
 
@@ -185,7 +191,11 @@ impl<'a> Text<'a> {
                 .into_iter()
                 .filter(|s| s.to_lowercase().starts_with(&input.to_lowercase()) && s != input)
                 .collect();
-            return if matches.is_empty() {None} else {Some(matches)};
+            return if matches.is_empty() {
+                None
+            } else {
+                Some(matches)
+            };
         };
         None
     }
@@ -204,41 +214,80 @@ impl<'a> Text<'a> {
             None => "".to_string(),
         };
 
-        let prompt = format!("{}{}: ", self.message, hint);
+        let prompt = format!("{}{}: ", &self.message, &hint);
+
+        let hint = hint.cyan().italic();
 
         let mut is_selecting_suggestion = false;
         let mut selected_suggestion: i64 = 0;
+        let mut selection_scroll = 0;
 
-        let apply_suggestion = |is_selecting_suggestion: &mut bool, selected_suggestion: &i64, matches: &Option<Vec<String>>, text: &mut String, cursor: &mut usize| {
+        let apply_suggestion = |is_selecting_suggestion: &mut bool,
+                                selected_suggestion: &mut i64,
+                                matches: &Option<Vec<String>>,
+                                text: &mut String,
+                                cursor: &mut usize| {
             if *is_selecting_suggestion {
                 *is_selecting_suggestion = false;
                 if let Some(suggestions) = matches {
                     *text = suggestions[*selected_suggestion as usize].clone();
                     *cursor = text.len();
+                    *selected_suggestion = 0;
                 }
             }
         };
 
         loop {
-
-            let matches = if text.is_empty() && !self.suggest_on_empty {None} else {self.match_suggestion(&text)};
+            let matches = if text.is_empty() && !self.suggest_on_empty {
+                None
+            } else {
+                self.match_suggestion(&text)
+            };
 
             crossterm::execute!(
                 stdout,
                 MoveToColumn(0),
                 Clear(terminal::ClearType::FromCursorDown),
-                Print(&prompt),
+                Print(&self.message),
+                Print(&hint),
+                Print(": "),
                 Print(&text),
                 MoveToColumn((prompt.len() + cursor) as u16),
             )
             .map_err(|e| UIError::Terminal(e.to_string()))?;
 
             if let Some(suggestions) = &matches {
-                let height = suggestions.len();
-                if selected_suggestion >= height as i64 {
-                    selected_suggestion = 0;
-                } else if selected_suggestion < 0 {
-                    selected_suggestion = height as i64 - 1;
+                let max_height = self.max_suggestions;
+                let height = if max_height.is_some() {
+                    max_height.unwrap().min(suggestions.len())
+                } else {
+                    suggestions.len()
+                };
+                if selected_suggestion >= (selection_scroll + height) as i64 {
+                    if selected_suggestion < suggestions.len() as i64
+                        && max_height
+                            .is_some_and(|m| selected_suggestion >= (selection_scroll + m) as i64)
+                    {
+                        selection_scroll = (selected_suggestion as usize / max_height.unwrap())
+                            * max_height.unwrap()
+                    } else {
+                        selected_suggestion = 0;
+                        selection_scroll = 0;
+                    }
+                } else if selected_suggestion < selection_scroll as i64 {
+                    if selected_suggestion >= 0
+                        && max_height.is_some()
+                        && selected_suggestion < selection_scroll as i64
+                    {
+                        selection_scroll = (selected_suggestion as usize / max_height.unwrap())
+                            * max_height.unwrap()
+                    } else {
+                        selected_suggestion = suggestions.len() as i64 - 1;
+                        if max_height.is_some() {
+                            selection_scroll = (selected_suggestion as usize / max_height.unwrap())
+                                * max_height.unwrap()
+                        }
+                    }
                 }
                 let suggested = &suggestions[selected_suggestion as usize];
                 let max_width = suggestions.iter().max_by_key(|s| s.len()).unwrap().len();
@@ -247,25 +296,47 @@ impl<'a> Text<'a> {
                 let (_, th) = terminal::size().map_err(|e| UIError::Terminal(e.to_string()))?;
 
                 if cy as u16 >= th - 1 {
-                    crossterm::queue!(
-                        stdout,
-                        ScrollUp(height as u16),
-                        MoveUp(height as u16)
-                    ).map_err(|e| UIError::Terminal(e.to_string()))?
+                    crossterm::queue!(stdout, ScrollUp(height as u16), MoveUp(height as u16))
+                        .map_err(|e| UIError::Terminal(e.to_string()))?
                 }
 
                 if is_selecting_suggestion {
-                    crossterm::queue!(
-                        stdout,
-                        MoveToColumn(prompt.len() as u16),
-                        Print(suggested),
-                    ).map_err(|e| UIError::Terminal(e.to_string()))?
+                    crossterm::queue!(stdout, MoveToColumn(prompt.len() as u16), Print(suggested),)
+                        .map_err(|e| UIError::Terminal(e.to_string()))?
                 }
 
                 for (i, s) in suggestions.iter().enumerate() {
-                    let bg_color = if is_selecting_suggestion && i == selected_suggestion as usize {Color::Cyan} else {Color::DarkGrey};
-                    let fg_color = if is_selecting_suggestion && i == selected_suggestion as usize {Color::Black} else {Color::Reset};
-                    let dim = if is_selecting_suggestion && i == selected_suggestion as usize {Attribute::Bold} else {Attribute::Dim};
+                    if self
+                        .max_suggestions
+                        .is_some_and(|m| !(selection_scroll..(selection_scroll + m)).contains(&i))
+                    {
+                        continue;
+                    }
+                    let bg_color = if is_selecting_suggestion && i == selected_suggestion as usize {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGrey
+                    };
+                    let fg_color = if is_selecting_suggestion && i == selected_suggestion as usize {
+                        Color::Black
+                    } else {
+                        Color::Reset
+                    };
+                    let dim = if is_selecting_suggestion && i == selected_suggestion as usize {
+                        Attribute::Bold
+                    } else {
+                        Attribute::Dim
+                    };
+                    let scroll_color = if max_height.is_some_and(|m| {
+                        (i - selection_scroll)
+                            == ((selection_scroll as f64
+                                / ((suggestions.len() / m) as f64 * m as f64 - m as f64))
+                                * (m - 1) as f64) as usize
+                    }) {
+                        Color::White
+                    } else {
+                        Color::DarkGrey
+                    };
                     crossterm::queue!(
                         stdout,
                         MoveToNextLine(1),
@@ -277,17 +348,40 @@ impl<'a> Text<'a> {
                         SetAttribute(dim),
                         SetBackgroundColor(bg_color),
                         SetForegroundColor(fg_color),
-                        Print(format!("{:<width$} ", &s[text.len()..], width = (max_width as i32 - text.len() as i32).max(0) as usize)),
+                        Print(format!(
+                            "{:<width$} ",
+                            &s[text.len()..],
+                            width = (max_width as i32 - text.len() as i32).max(0) as usize
+                        )),
+                        ResetColor,
+                        SetForegroundColor(scroll_color),
+                        Print(format!(
+                            "{}",
+                            if max_height.is_some_and(|m| suggestions.len() >= m) {
+                                "▌"
+                            } else {
+                                ""
+                            }
+                        )),
                         SetAttribute(Attribute::Reset),
-                    ).map_err(|e| UIError::Terminal(e.to_string()))?
+                    )
+                    .map_err(|e| UIError::Terminal(e.to_string()))?
                 }
                 crossterm::queue!(
                     stdout,
                     MoveUp(height as u16),
-                    MoveToColumn((prompt.len() + (if is_selecting_suggestion {suggested.len()} else {cursor})) as u16),
+                    MoveToColumn(
+                        (prompt.len()
+                            + (if is_selecting_suggestion {
+                                suggested.len()
+                            } else {
+                                cursor
+                            })) as u16
+                    ),
                     SetAttribute(Attribute::Reset),
                     ResetColor,
-                ).map_err(|e| UIError::Other(e.to_string()))?;
+                )
+                .map_err(|e| UIError::Other(e.to_string()))?;
                 stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
             };
 
@@ -309,7 +403,7 @@ impl<'a> Text<'a> {
                             }
                             continue;
                         }
-                    },
+                    }
                     KeyCode::BackTab => {
                         if let Some(suggs) = &matches {
                             if is_selecting_suggestion {
@@ -324,6 +418,13 @@ impl<'a> Text<'a> {
                     KeyCode::Char(c) => {
                         if key_event.modifiers == KeyModifiers::CONTROL {
                             if c == 'h' {
+                                apply_suggestion(
+                                    &mut is_selecting_suggestion,
+                                    &mut selected_suggestion,
+                                    &matches,
+                                    &mut text,
+                                    &mut cursor,
+                                );
                                 let end = cursor;
                                 let mut in_word = true;
                                 for (i, c) in text.chars().rev().enumerate() {
@@ -348,9 +449,11 @@ impl<'a> Text<'a> {
                             } else if c == 'c' {
                                 Text::render_finish(
                                     &mut stdout,
-                                    &prompt,
+                                    &self.message,
+                                    &hint,
                                     "<interrupted>",
                                     Color::Red,
+                                    None,
                                 )?;
                                 crossterm::execute!(
                                     stdout,
@@ -362,19 +465,37 @@ impl<'a> Text<'a> {
                                 return Err(UIError::Canceled);
                             }
                         }
-                        apply_suggestion(&mut is_selecting_suggestion, &selected_suggestion, &matches, &mut text, &mut cursor);
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         text.insert(cursor, c);
                         cursor += 1;
                     }
                     KeyCode::Backspace => {
-                        apply_suggestion(&mut is_selecting_suggestion, &selected_suggestion, &matches, &mut text, &mut cursor);
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         if cursor > 0 {
                             text.remove(cursor - 1);
                             cursor = (cursor as i32 - 1).max(0) as usize;
                         }
                     }
                     KeyCode::Delete => {
-                        apply_suggestion(&mut is_selecting_suggestion, &selected_suggestion, &matches, &mut text, &mut cursor);
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         if cursor < text.len() {
                             if key_event.modifiers == KeyModifiers::CONTROL {
                                 let start = cursor;
@@ -404,7 +525,13 @@ impl<'a> Text<'a> {
                         }
                     }
                     KeyCode::Enter => {
-                        apply_suggestion(&mut is_selecting_suggestion, &selected_suggestion, &matches, &mut text, &mut cursor);
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         break;
                     }
                     KeyCode::Left => {
@@ -458,10 +585,18 @@ impl<'a> Text<'a> {
                     KeyCode::Esc => {
                         if is_selecting_suggestion {
                             is_selecting_suggestion = false;
-                            continue
+                            continue;
                         }
-                        Text::render_finish(&mut stdout, &prompt, "<canceled>", Color::Red)?;
-                        crossterm::execute!(stdout, cursor::SetCursorStyle::DefaultUserShape).map_err(|e| UIError::Terminal(e.to_string()))?;
+                        Text::render_finish(
+                            &mut stdout,
+                            &self.message,
+                            &hint,
+                            "<canceled>",
+                            Color::Red,
+                            None,
+                        )?;
+                        crossterm::execute!(stdout, cursor::SetCursorStyle::DefaultUserShape)
+                            .map_err(|e| UIError::Terminal(e.to_string()))?;
                         crossterm::terminal::disable_raw_mode()
                             .map_err(|e| UIError::Terminal(e.to_string()))?;
                         return Err(UIError::Canceled);
@@ -473,7 +608,18 @@ impl<'a> Text<'a> {
             }
         }
 
-        Text::render_finish(&mut stdout, &prompt, &text, Color::Green)?;
+        Text::render_finish(
+            &mut stdout,
+            &self.message,
+            &hint,
+            &text,
+            Color::Green,
+            Some(
+                Attributes::default()
+                    .with(Attribute::Bold)
+                    .with(Attribute::Underlined),
+            ),
+        )?;
 
         crossterm::execute!(stdout, cursor::SetCursorStyle::DefaultUserShape)
             .map_err(|e| UIError::Terminal(e.to_string()))?;
@@ -484,15 +630,24 @@ impl<'a> Text<'a> {
 
     fn render_finish(
         stdout: &mut Stdout,
-        prompt: &'a str,
+        message: &'a str,
+        hint: &'a StyledContent<String>,
         text: &str,
         color: Color,
+        attributes: Option<Attributes>,
     ) -> Result<(), UIError> {
         crossterm::execute!(
             stdout,
             MoveToColumn(0),
             Clear(terminal::ClearType::FromCursorDown),
-            Print(prompt),
+            Print(&message),
+            Print(&hint),
+            Print(": "),
+            SetAttributes(if attributes.is_some() {
+                attributes.unwrap()
+            } else {
+                Attributes::default()
+            }),
             SetForegroundColor(color),
             Print(format!("{}\n", text)),
             MoveToColumn(0),
@@ -502,20 +657,56 @@ impl<'a> Text<'a> {
     }
 }
 
+struct Select<'a, T> {
+    message: &'a str,
+    initial_value: usize,
+    formatter: Option<Box<dyn Fn(&T) -> String>>,
+    options: &'a [ T],
+    filter_input: bool,
+}
+
+impl<'a, T> Select<'a, T> {
+
+    fn new(message: &'a str, options: &'a [T]) -> Self {
+        Self {
+            message,
+            initial_value: 0,
+            formatter: None,
+            options,
+            filter_input: true }
+    }
+
+}
+
 #[cfg(test)]
 mod test {
 
     use super::*;
 
     #[test]
-    fn test_input() {
+    fn test_text() {
         let text = Text::new("Type something please")
             .with_initial_value("Init")
             .with_auto_completion(vec![
+                "Genshin Impact".to_owned(),
+                "Zenless Zone Zero".to_owned(),
+                "Valorant".to_owned(),
+                "Counter Strike".to_owned(),
+                "League of Legends".to_owned(),
+                "Terraria".to_owned(),
                 "Minecraft".to_owned(),
-                "Modern Warfare".to_owned(),
-                "Model".to_owned(),
+                "Call of Duty Modern Warfare".to_owned(),
+                "Honkai Impact".to_owned(),
+                "Honkai Star Rail".to_owned(),
+                "Minecraft Dungeon".to_owned(),
+                "NeiR Automata".to_owned(),
+                "Battlefield".to_owned(),
+                "Arknight Endfield".to_owned(),
+                "Ghost of Tsushima".to_owned(),
             ])
+            .with_suggest_on_empty(true)
+            // .with_max_suggestions(None)
+            .with_hint("Games please")
             .prompt();
 
         match text {

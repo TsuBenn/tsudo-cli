@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, env, fs, process};
+use std::{collections::{HashSet}, env, fs, process};
 
 mod ui;
 use crossterm::style::Stylize;
@@ -82,7 +82,6 @@ impl TodoList {
             }
             println!()
         }
-        println!();
     }
 }
 
@@ -164,6 +163,7 @@ fn get_command(args: Vec<String>) -> Command {
 }
 
 fn main() {
+
     let todo_list = match find_todo_list() {
         Ok(todo_list) => Ok(todo_list),
         Err(err) => {
@@ -210,9 +210,17 @@ fn main() {
                         Ok(true) => {
                             new_todo_list = TodoList::new();
                         }
-                        _ => {
+                        Err(ui::UIError::Canceled) | Ok(false) => {
                             eprintln!("No 'todo.json' has been created!");
                             process::exit(0)
+                        }
+                        Err(ui::UIError::Terminal(err)) => {
+                            eprintln!("Terminal error: {err}");
+                            process::exit(1)
+                        }
+                        Err(ui::UIError::Other(err)) => {
+                            eprintln!("Error: {err}");
+                            process::exit(1)
                         }
                     }
                 }
@@ -226,13 +234,28 @@ fn main() {
                 Ok(tag) => {
                     new_item.tag = tag
                 },
-                Err(_) => {
+                Err(ui::UIError::Canceled) => {
                     eprintln!("No tasks has been added!");
                     process::exit(0)
                 }
+                Err(ui::UIError::Terminal(err)) => {
+                    eprintln!("Terminal error: {err}");
+                    process::exit(1)
+                }
+                Err(ui::UIError::Other(err)) => {
+                    eprintln!("Error: {err}");
+                    process::exit(1)
+                }
             }
             new_todo_list.push(new_item.clone());
-            new_todo_list.save().unwrap();
+            match new_todo_list.save() {
+                Ok(()) => {}
+                _ => {
+                    eprintln!("Problem with saving to 'todo.json'!");
+                    eprintln!("No change has been made!");
+                    process::exit(1)
+                }
+            }
             new_todo_list.print_highlight(Some(new_item));
         }
         Command::Filter => {
@@ -247,7 +270,15 @@ fn main() {
                         todo_list.items.retain(|i| i.tag == tag);
                         todo_list.print();
                     }
-                    Err(_) => {}
+                    Err(ui::UIError::Canceled) => {}
+                    Err(ui::UIError::Terminal(err)) => {
+                        eprintln!("Terminal error: {err}");
+                        process::exit(1)
+                    }
+                    Err(ui::UIError::Other(err)) => {
+                        eprintln!("Error: {err}");
+                        process::exit(1)
+                    }
                 }
             }
         }
