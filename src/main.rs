@@ -1,10 +1,10 @@
-use std::{collections::{HashSet}, env, fs, process};
+use std::{collections::HashSet, env, fs, process};
 
 mod ui;
-use crossterm::style::Stylize;
+use crossterm::style::{Color, Stylize};
 use serde::{Deserialize, Serialize};
 
-use crate::ui::{Confirm, Text};
+use crate::ui::{Confirm, MultiSelect, Select, Text};
 
 const FILE: &'static str = "todo.json";
 
@@ -14,7 +14,7 @@ struct TodoList {
     path: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 struct TodoItem {
     description: String,
     tag: String,
@@ -29,11 +29,22 @@ impl TodoList {
         }
     }
     fn get_tags(&self) -> Vec<String> {
-        self.items.iter().map(|item| item.tag.clone()).collect::<HashSet<_>>().into_iter().collect()
+        self.items
+            .iter()
+            .map(|item| item.tag.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
     }
     fn push(&mut self, item: TodoItem) {
         self.items.push(item);
         self.sort()
+    }
+    fn remove(&mut self, indices: &mut [usize]) {
+        indices.sort_by(|a, b| b.cmp(&a));
+        for i in indices {
+            self.items.remove(*i);
+        }
     }
     fn save(&self) -> Result<(), TodoListError> {
         let content =
@@ -46,6 +57,57 @@ impl TodoList {
     fn print(&self) {
         self.print_highlight(None);
     }
+    fn print_remove(&self, to_remove: &[usize]) {
+        println!();
+        if self.items.is_empty() {
+            println!("Todo list empty!");
+            return;
+        }
+        let mut i = 0;
+        for chunk in self.items.chunk_by(|a, b| a.tag == b.tag) {
+            let tag = &chunk[0].tag;
+            if tag.is_empty() {
+                println!(
+                    " {}",
+                    format!("{}:", "__untagged__")
+                        .bold()
+                        .italic()
+                        .dark_cyan()
+                        .dim()
+                );
+            } else {
+                println!(" {}", format!("{}:", tag).bold().italic().cyan());
+            }
+            for item in chunk {
+                let status = if item.done { "[✔]" } else { "[ ]" };
+                if to_remove.contains(&i)
+                {
+                    println!(
+                        "   {}",
+                        format!("{} {}", status, item.description.to_owned())
+                            .crossed_out()
+                            .red()
+                    );
+                } else {
+                    if item.done {
+                        println!(
+                            "{}",
+                            format!("   {} {}", status, item.description.to_owned())
+                                .green()
+                                .bold()
+                        );
+                    } else {
+                        println!(
+                            "{}",
+                            format!("   {} {}", status, item.description.to_owned())
+                        );
+                    }
+                }
+                i += 1;
+            }
+            println!()
+        }
+    }
     fn print_highlight(&self, to_highlight: Option<TodoItem>) {
         println!();
         if self.items.is_empty() {
@@ -55,7 +117,14 @@ impl TodoList {
         for chunk in self.items.chunk_by(|a, b| a.tag == b.tag) {
             let tag = &chunk[0].tag;
             if tag.is_empty() {
-                println!(" {}", format!("{}:", "__untagged__").bold().italic().dark_cyan().dim());
+                println!(
+                    " {}",
+                    format!("{}:", "__untagged__")
+                        .bold()
+                        .italic()
+                        .dark_cyan()
+                        .dim()
+                );
             } else {
                 println!(" {}", format!("{}:", tag).bold().italic().cyan());
             }
@@ -63,20 +132,28 @@ impl TodoList {
                 let status = if item.done { "[✔]" } else { "[ ]" };
                 if to_highlight
                     .as_ref()
-                    .is_some_and(|i| i.description == item.description)
+                    .is_some_and(|i| i.description == item.description && i.tag == item.tag)
                 {
                     println!(
                         "{}",
-                        format!("   {} {}", status, item.description.to_owned()).bold().yellow().slow_blink()
+                        format!("   {} {}", status, item.description.to_owned())
+                            .bold()
+                            .yellow()
+                            .slow_blink()
                     );
                 } else {
                     if item.done {
                         println!(
                             "{}",
-                            format!("   {} {}", status, item.description.to_owned()).green().bold()
+                            format!("   {} {}", status, item.description.to_owned())
+                                .green()
+                                .bold()
                         );
                     } else {
-                        println!("{}", format!("   {} {}", status, item.description.to_owned()));
+                        println!(
+                            "{}",
+                            format!("   {} {}", status, item.description.to_owned())
+                        );
                     }
                 }
             }
@@ -102,12 +179,13 @@ fn find_todo_list() -> Result<TodoList, TodoFindError> {
         let file_path = current_dir.join(FILE);
 
         if file_path.is_file() {
-            let content = fs::read_to_string(file_path).unwrap();
+            let content = fs::read_to_string(&file_path).unwrap();
             match serde_json::from_str::<TodoList>(&content) {
                 Ok(mut todo_list) => {
+                    todo_list.path = file_path.into_string().unwrap_or(FILE.to_string());
                     todo_list.sort();
-                    return Ok(todo_list)
-                },
+                    return Ok(todo_list);
+                }
                 Err(_) => return Err(TodoFindError::Invalid),
             }
         }
@@ -153,8 +231,11 @@ fn get_command(args: Vec<String>) -> Command {
                 tag: String::new(),
             };
         }
+        "complete" | "done" => return Command::Complete,
+        "edit" => return Command::Edit,
+        "remove" | "delete" | "rm" => return Command::Remove,
         "filter" => {
-            return  Command::Filter;
+            return Command::Filter;
         }
         _ => {}
     }
@@ -163,7 +244,6 @@ fn get_command(args: Vec<String>) -> Command {
 }
 
 fn main() {
-
     let todo_list = match find_todo_list() {
         Ok(todo_list) => Ok(todo_list),
         Err(err) => {
@@ -199,9 +279,7 @@ fn main() {
                 done: false,
             };
             match todo_list {
-                Ok(todo_list) => {
-                    new_todo_list = todo_list
-                }
+                Ok(todo_list) => new_todo_list = todo_list,
                 Err(_) => {
                     let selection = Confirm::new("Create new 'todo.json'?")
                         .with_default(true)
@@ -231,9 +309,7 @@ fn main() {
                 .with_suggest_on_empty(true)
                 .prompt()
             {
-                Ok(tag) => {
-                    new_item.tag = tag
-                },
+                Ok(tag) => new_item.tag = tag,
                 Err(ui::UIError::Canceled) => {
                     eprintln!("No tasks has been added!");
                     process::exit(0)
@@ -260,14 +336,18 @@ fn main() {
         }
         Command::Filter => {
             if let Ok(mut todo_list) = todo_list {
-                match Text::new("Enter Tag filter")
-                    .with_default("")
-                    .with_auto_completion(todo_list.get_tags())
-                    .with_suggest_on_empty(true)
-                    .prompt()
-                {
-                    Ok(tag) => {
-                        todo_list.items.retain(|i| i.tag == tag);
+                let mut tag_select = Select::<String>::new("Enter Tag filter", |i| {
+                    if i.is_empty() {
+                        "__untagged__".to_string()
+                    } else {
+                        i.clone()
+                    }
+                });
+                let mut tags = todo_list.get_tags();
+                tag_select.add_items(tags.iter_mut().collect(), None);
+                match tag_select.prompt() {
+                    Ok((i, tag)) => {
+                        todo_list.items.retain(|i| i.tag == *tag);
                         todo_list.print();
                     }
                     Err(ui::UIError::Canceled) => {}
@@ -277,6 +357,198 @@ fn main() {
                     }
                     Err(ui::UIError::Other(err)) => {
                         eprintln!("Error: {err}");
+                        process::exit(1)
+                    }
+                }
+            }
+        }
+        Command::Complete => {
+            if let Ok(mut todo_list) = todo_list {
+                let mut done_multi_selection =
+                    MultiSelect::<TodoItem>::new("Toggle tasks completion status", |i| {
+                        i.description.clone()
+                    })
+                    .with_group_items(true)
+                    .with_page_size(10)
+                    .with_initial_selection(
+                        todo_list
+                            .items
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, item)| if item.done { Some(i) } else { None })
+                            .collect(),
+                    );
+                for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
+                    let tag = &chunk[0].tag;
+                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
+                    done_multi_selection.add_items(chunk.iter_mut().collect(), Some(&group));
+                }
+                match done_multi_selection.prompt() {
+                    Ok(result) => {
+                        for (_, item) in result.selected {
+                            item.done = true
+                        }
+                        for (_, item) in result.unselected {
+                            item.done = false
+                        }
+                        match todo_list.save() {
+                            Ok(()) => {}
+                            _ => {
+                                eprintln!("Problem with saving to 'todo.json'!");
+                                eprintln!("No change has been made!");
+                                process::exit(1)
+                            }
+                        }
+                        todo_list.print();
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        Command::Edit => {
+            if let Ok(mut todo_list) = todo_list {
+                let mut edit_select =
+                    Select::<TodoItem>::new("Select a task to edit", |i| i.description.clone())
+                        .with_group_items(true)
+                        .with_page_size(10);
+                let tags = todo_list.get_tags();
+                for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
+                    let tag = &chunk[0].tag;
+                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
+                    edit_select.add_items(chunk.iter_mut().collect(), Some(&group));
+                }
+                match edit_select.prompt() {
+                    Ok((_, selected)) => {
+                        let mut field_select =
+                            Select::<String>::new("Select a field to edit", |i| i.clone());
+                        let mut options = vec!["Description".to_owned(), "Tag".to_owned()];
+                        field_select.add_items(options.iter_mut().collect(), None);
+                        match field_select.prompt() {
+                            Ok((0, _)) => {
+                                match Text::new("Enter new task description")
+                                    .with_default(&selected.description)
+                                    .with_initial_value(&selected.description)
+                                    .prompt()
+                                {
+                                    Ok(new_description) => selected.description = new_description,
+                                    Err(ui::UIError::Canceled) => {
+                                        eprintln!("No tasks has been edited!");
+                                        process::exit(0)
+                                    }
+                                    Err(ui::UIError::Terminal(err)) => {
+                                        eprintln!("Terminal error: {err}");
+                                        process::exit(1)
+                                    }
+                                    Err(ui::UIError::Other(err)) => {
+                                        eprintln!("Error: {err}");
+                                        process::exit(1)
+                                    }
+                                }
+                            }
+                            Ok((1, _)) => {
+                                match Text::new("Enter new task description")
+                                    .with_default(&selected.tag)
+                                    .with_initial_value(&selected.tag)
+                                    .with_auto_completion(tags)
+                                    .with_suggest_on_empty(true)
+                                    .prompt()
+                                {
+                                    Ok(new_tag) => selected.tag = new_tag,
+                                    Err(ui::UIError::Canceled) => {
+                                        eprintln!("No tasks has been edited!");
+                                        process::exit(0)
+                                    }
+                                    Err(ui::UIError::Terminal(err)) => {
+                                        eprintln!("Terminal error: {err}");
+                                        process::exit(1)
+                                    }
+                                    Err(ui::UIError::Other(err)) => {
+                                        eprintln!("Error: {err}");
+                                        process::exit(1)
+                                    }
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(ui::UIError::Canceled) => {
+                                eprintln!("No tasks has been edited!");
+                                process::exit(0)
+                            }
+                            Err(ui::UIError::Terminal(err)) => {
+                                eprintln!("Terminal error: {err}");
+                                process::exit(1)
+                            }
+                            Err(ui::UIError::Other(err)) => {
+                                eprintln!("Error: {err}");
+                                process::exit(1)
+                            }
+                        }
+                        let edited_item = Some(selected.clone());
+                        todo_list.sort();
+                        match todo_list.save() {
+                            Ok(()) => {}
+                            _ => {
+                                eprintln!("Problem with saving to 'todo.json'!");
+                                eprintln!("No change has been made!");
+                                process::exit(1)
+                            }
+                        }
+                        todo_list.print_highlight(edited_item);
+                    }
+                    Err(ui::UIError::Canceled) => {
+                        eprintln!("No tasks has been edited!");
+                        process::exit(0)
+                    }
+                    Err(ui::UIError::Terminal(err)) => {
+                        eprintln!("Terminal error: {err}");
+                        process::exit(1)
+                    }
+                    Err(ui::UIError::Other(err)) => {
+                        eprintln!("Error: {err}");
+                        process::exit(1)
+                    }
+                }
+            }
+        }
+        Command::Remove => {
+            if let Ok(mut todo_list) = todo_list {
+                let mut remove_multi_selection =
+                    MultiSelect::<TodoItem>::new("Select tasks for removal", |i| {
+                        let status = if i.done {"(✓)"} else {"( )"};
+                        format!("{} {}", status, i.description)
+                    })
+                    .with_group_items(true)
+                    .with_page_size(10)
+                    .with_selected_color(Color::Red);
+                for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
+                    let tag = &chunk[0].tag;
+                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
+                    remove_multi_selection.add_items(chunk.iter_mut().collect(), Some(&group));
+                }
+                let mut to_remove: Vec<usize>;
+                match remove_multi_selection.prompt() {
+                    Ok(result) => {
+                        to_remove = result.selected.iter().map(|(i, _)| *i).collect();
+                    }
+                    Err(ui::UIError::Canceled) => {
+                        eprintln!("No tasks has been removed!");
+                        process::exit(0)
+                    }
+                    Err(ui::UIError::Terminal(err)) => {
+                        eprintln!("Terminal error: {err}");
+                        process::exit(1)
+                    }
+                    Err(ui::UIError::Other(err)) => {
+                        eprintln!("Error: {err}");
+                        process::exit(1)
+                    }
+                }
+                todo_list.print_remove(&to_remove);
+                todo_list.remove(&mut to_remove);
+                match todo_list.save() {
+                    Ok(()) => {}
+                    _ => {
+                        eprintln!("Problem with saving to 'todo.json'!");
+                        eprintln!("No change has been made!");
                         process::exit(1)
                     }
                 }
