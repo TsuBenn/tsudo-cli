@@ -6,7 +6,7 @@ use std::{
 
 use crossterm::{
     cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveUp},
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetBackgroundColor,
@@ -25,6 +25,58 @@ pub enum UIError {
 pub struct Confirm<'a> {
     message: &'a str,
     default: bool,
+}
+
+fn render_prompt(
+    stdout: &mut Stdout,
+    message: &str,
+    hint: &Option<String>,
+    text: &str,
+    color: Color,
+    attributes: Option<Attributes>,
+    new_line: bool,
+) -> Result<usize, UIError> {
+    let hint = if hint.as_ref().is_some_and(|h| !h.is_empty()) {
+        format!("[{}]", hint.as_ref().unwrap()).cyan().to_string()
+    } else {
+        String::new()
+    };
+    let prompt = format!("{} {} {}: ", "?".to_string().green(), &message, &hint);
+    crossterm::execute!(
+        stdout,
+        MoveToColumn(0),
+        Clear(terminal::ClearType::FromCursorDown),
+        SetAttribute(Attribute::Bold),
+        Print(&prompt),
+        SetAttribute(Attribute::Reset),
+        SetAttributes(if attributes.is_some() {
+            attributes.unwrap()
+        } else {
+            Attributes::default()
+        }),
+        SetForegroundColor(color),
+        Print(format!("{}{}", text, if new_line { "\n" } else { "" })),
+        MoveToColumn(0),
+        ResetColor,
+    )
+    .map_err(|e| UIError::Terminal(e.to_string()))?;
+    Ok(strip_ansi_escapes::strip_str(&prompt).len())
+}
+
+fn cleanup_terminal(stdout: &mut Stdout, report_cancel: bool) -> Result<(), UIError> {
+    crossterm::execute!(
+        stdout,
+        cursor::Show,
+        cursor::SetCursorStyle::DefaultUserShape
+    )
+    .map_err(|e| UIError::Terminal(e.to_string()))?;
+    crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
+
+    if report_cancel {
+        return Err(UIError::Canceled);
+    }
+
+    Ok(())
 }
 
 impl<'a> Confirm<'a> {
@@ -47,16 +99,18 @@ impl<'a> Confirm<'a> {
         crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
         crossterm::execute!(stdout, cursor::Hide).map_err(|e| UIError::Terminal(e.to_string()))?;
 
-        let options = if self.default { "[Y/n]" } else { "[y/N]" };
+        let options = Some((if self.default { "Y/n" } else { "y/N" }).to_string());
 
         loop {
-            crossterm::execute!(
-                stdout,
-                MoveToColumn(0),
-                Clear(terminal::ClearType::CurrentLine),
-                Print(format!("{} {}:", self.message, options)),
-            )
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
+            render_prompt(
+                &mut stdout,
+                self.message,
+                &options,
+                "",
+                Color::Reset,
+                None,
+                false,
+            )?;
 
             if let Event::Key(key_event) =
                 event::read().map_err(|e| UIError::Terminal(e.to_string()))?
@@ -74,19 +128,31 @@ impl<'a> Confirm<'a> {
                         selection = false;
                         break;
                     }
+                    KeyCode::Char('c') => {
+                        if key_event.modifiers == KeyModifiers::CONTROL {
+                            render_prompt(
+                                &mut stdout,
+                                self.message,
+                                &options,
+                                "<interupted>",
+                                Color::Red,
+                                None,
+                                true,
+                            )?;
+                            cleanup_terminal(&mut stdout, true)?;
+                        }
+                    }
                     KeyCode::Esc => {
-                        Confirm::render_finish(
+                        render_prompt(
                             &mut stdout,
                             self.message,
-                            options,
+                            &options,
                             "<canceled>",
                             Color::Red,
+                            None,
+                            true,
                         )?;
-                        crossterm::execute!(stdout, cursor::Show)
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        crossterm::terminal::disable_raw_mode()
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        return Err(UIError::Canceled);
+                        cleanup_terminal(&mut stdout, true)?;
                     }
                     KeyCode::Enter => {
                         break;
@@ -98,38 +164,23 @@ impl<'a> Confirm<'a> {
             }
         }
 
-        Confirm::render_finish(
+        render_prompt(
             &mut stdout,
             self.message,
-            options,
+            &options,
             if selection { "Yes" } else { "No" },
             Color::Green,
+            Some(
+                Attributes::default()
+                    .with(Attribute::Bold)
+                    .with(Attribute::Underlined),
+            ),
+            true,
         )?;
 
-        crossterm::execute!(stdout, cursor::Show).map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
+        cleanup_terminal(&mut stdout, false)?;
 
         Ok(selection)
-    }
-
-    fn render_finish(
-        stdout: &mut Stdout,
-        message: &'a str,
-        options: &str,
-        answer: &str,
-        color: Color,
-    ) -> Result<(), UIError> {
-        crossterm::execute!(
-            stdout,
-            MoveToColumn(0),
-            Clear(terminal::ClearType::CurrentLine),
-            Print(format!("{} {}: ", message, options)),
-            SetForegroundColor(color),
-            Print(format!("{}\n", answer)),
-            MoveToColumn(0),
-            ResetColor
-        )
-        .map_err(|e| UIError::Terminal(e.to_string()))
     }
 }
 
@@ -202,6 +253,121 @@ impl<'a> Text<'a> {
         None
     }
 
+    fn delete_word_back(cursor: &mut usize, text: &mut String) {
+        let end = *cursor;
+        let mut in_word = true;
+        for (i, c) in text.chars().rev().enumerate() {
+            if text.len() - i < *cursor {
+                if !c.is_whitespace() {
+                    if in_word {
+                        continue;
+                    } else {
+                        *cursor = text.len() - i;
+                        break;
+                    }
+                } else {
+                    in_word = false
+                }
+            }
+        }
+        if in_word {
+            *cursor = 0;
+        }
+        (*text).replace_range(*cursor..end, "");
+    }
+
+    fn type_char(cursor: &mut usize, text: &mut String, c: char) {
+        (*text).insert(*cursor, c);
+        *cursor += 1;
+    }
+
+    fn delete_char_back(cursor: &mut usize, text: &mut String) {
+        if *cursor > 0 {
+            (*text).remove(*cursor - 1);
+            *cursor = (*cursor as i32 - 1).max(0) as usize;
+        }
+    }
+
+    fn delete_front(cursor: &mut usize, text: &mut String, key_event: &KeyEvent) {
+        if key_event.modifiers == KeyModifiers::CONTROL {
+            let start = *cursor;
+            let mut in_word = true;
+            for (i, c) in (*text).chars().enumerate() {
+                if i > *cursor {
+                    if !c.is_whitespace() {
+                        if in_word {
+                            continue;
+                        } else {
+                            *cursor = i;
+                            break;
+                        }
+                    } else {
+                        in_word = false
+                    }
+                }
+            }
+            if in_word {
+                *cursor = text.len();
+            }
+            (*text).replace_range(start..*cursor, "");
+            *cursor = start;
+            return;
+        }
+        if *cursor < text.len() {
+            (*text).remove(*cursor);
+        }
+    }
+
+    fn move_left(cursor: &mut usize, text: &mut String, key_event: &KeyEvent) {
+        if key_event.modifiers == KeyModifiers::CONTROL {
+            let mut in_word = true;
+            for (i, c) in (*text).chars().rev().enumerate() {
+                if text.len() - i <= *cursor {
+                    if !c.is_whitespace() {
+                        if in_word {
+                            continue;
+                        } else {
+                            *cursor = text.len() - i;
+                            break;
+                        }
+                    } else {
+                        in_word = false
+                    }
+                }
+            }
+            if in_word {
+                *cursor = 0;
+            }
+            return;
+        }
+        *cursor = (*cursor as i32 - 1).max(0) as usize;
+    }
+
+    fn move_right(cursor: &mut usize, text: &mut String, key_event: &KeyEvent) {
+        if key_event.modifiers == KeyModifiers::CONTROL {
+            let mut in_word = true;
+            for (i, c) in text.chars().enumerate() {
+                if i >= *cursor {
+                    if !c.is_whitespace() {
+                        if in_word {
+                            continue;
+                        } else {
+                            *cursor = i;
+                            break;
+                        }
+                    } else {
+                        in_word = false
+                    }
+                }
+            }
+            if in_word {
+                *cursor = text.len();
+            }
+            return;
+        }
+        *cursor = (*cursor as i32 + 1).min(text.len() as i32) as usize;
+    }
+
     pub fn prompt(&self) -> Result<String, UIError> {
         let mut stdout = stdout();
         let mut text = self.initial_value.clone();
@@ -210,15 +376,6 @@ impl<'a> Text<'a> {
         crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
         crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
             .map_err(|e| UIError::Terminal(e.to_string()))?;
-
-        let hint = match &self.hint {
-            Some(hint) => format!(" [{}]", hint),
-            None => "".to_string(),
-        };
-
-        let prompt = format!("{}{}: ", &self.message, &hint);
-
-        let hint = hint.cyan().italic();
 
         let mut is_selecting_suggestion = false;
         let mut selected_suggestion: i64 = 0;
@@ -246,17 +403,18 @@ impl<'a> Text<'a> {
                 self.match_suggestion(&text)
             };
 
-            crossterm::queue!(
-                stdout,
-                MoveToColumn(0),
-                Clear(terminal::ClearType::FromCursorDown),
-                Print(&self.message),
-                Print(&hint),
-                Print(": "),
-                Print(&text),
-                MoveToColumn((prompt.len() + cursor) as u16),
-            )
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
+            let prompt_len = render_prompt(
+                &mut stdout,
+                &self.message,
+                &self.hint,
+                &text,
+                Color::Reset,
+                None,
+                false,
+            )?;
+
+            crossterm::queue!(stdout, MoveToColumn((prompt_len + cursor) as u16))
+                .map_err(|e| UIError::Terminal(e.to_string()))?;
 
             if let Some(suggestions) = &matches {
                 let max_height = self.max_suggestions;
@@ -305,7 +463,7 @@ impl<'a> Text<'a> {
                 }
 
                 if is_selecting_suggestion {
-                    crossterm::queue!(stdout, MoveToColumn(prompt.len() as u16), Print(suggested),)
+                    crossterm::queue!(stdout, MoveToColumn(prompt_len as u16), Print(suggested),)
                         .map_err(|e| UIError::Terminal(e.to_string()))?
                 }
 
@@ -344,7 +502,7 @@ impl<'a> Text<'a> {
                     crossterm::queue!(
                         stdout,
                         MoveToNextLine(1),
-                        MoveToColumn((prompt.len() - 1) as u16),
+                        MoveToColumn((prompt_len - 1) as u16),
                         SetBackgroundColor(bg_color),
                         SetForegroundColor(fg_color),
                         SetAttribute(Attribute::Bold),
@@ -375,7 +533,7 @@ impl<'a> Text<'a> {
                     stdout,
                     MoveUp(height as u16),
                     MoveToColumn(
-                        (prompt.len()
+                        (prompt_len
                             + (if is_selecting_suggestion {
                                 suggested.len()
                             } else {
@@ -430,44 +588,19 @@ impl<'a> Text<'a> {
                                     &mut text,
                                     &mut cursor,
                                 );
-                                let end = cursor;
-                                let mut in_word = true;
-                                for (i, c) in text.chars().rev().enumerate() {
-                                    if text.len() - i < cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                cursor = text.len() - i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    cursor = 0;
-                                }
-                                text.replace_range(cursor..end, "");
+                                Text::delete_word_back(&mut cursor, &mut text);
                                 continue;
                             } else if c == 'c' {
-                                Text::render_finish(
+                                render_prompt(
                                     &mut stdout,
                                     &self.message,
-                                    &hint,
-                                    "<interrupted>",
+                                    &self.hint,
+                                    "<interupted>",
                                     Color::Red,
                                     None,
+                                    true,
                                 )?;
-                                crossterm::execute!(
-                                    stdout,
-                                    cursor::SetCursorStyle::DefaultUserShape
-                                )
-                                .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                crossterm::terminal::disable_raw_mode()
-                                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                return Err(UIError::Canceled);
+                                cleanup_terminal(&mut stdout, true)?;
                             }
                         }
                         apply_suggestion(
@@ -477,8 +610,7 @@ impl<'a> Text<'a> {
                             &mut text,
                             &mut cursor,
                         );
-                        text.insert(cursor, c);
-                        cursor += 1;
+                        Text::type_char(&mut cursor, &mut text, c);
                     }
                     KeyCode::Backspace => {
                         apply_suggestion(
@@ -488,10 +620,7 @@ impl<'a> Text<'a> {
                             &mut text,
                             &mut cursor,
                         );
-                        if cursor > 0 {
-                            text.remove(cursor - 1);
-                            cursor = (cursor as i32 - 1).max(0) as usize;
-                        }
+                        Text::delete_char_back(&mut cursor, &mut text);
                     }
                     KeyCode::Delete => {
                         apply_suggestion(
@@ -501,33 +630,8 @@ impl<'a> Text<'a> {
                             &mut text,
                             &mut cursor,
                         );
-                        if cursor < text.len() {
-                            if key_event.modifiers == KeyModifiers::CONTROL {
-                                let start = cursor;
-                                let mut in_word = true;
-                                for (i, c) in text.chars().enumerate() {
-                                    if i > cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                cursor = i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    cursor = text.len();
-                                }
-                                text.replace_range(start..cursor, "");
-                                cursor = start;
-                                continue;
-                            }
-                            text.remove(cursor);
-                        }
+                        Text::delete_front(&mut cursor, &mut text, &key_event);
+                        continue;
                     }
                     KeyCode::Enter => {
                         apply_suggestion(
@@ -540,71 +644,28 @@ impl<'a> Text<'a> {
                         break;
                     }
                     KeyCode::Left => {
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in text.chars().rev().enumerate() {
-                                if text.len() - i <= cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            cursor = text.len() - i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                cursor = 0;
-                            }
-                            continue;
-                        }
-                        cursor = (cursor as i32 - 1).max(0) as usize;
+                        Text::move_left(&mut cursor, &mut text, &key_event);
+                        continue;
                     }
                     KeyCode::Right => {
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in text.chars().enumerate() {
-                                if i >= cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            cursor = i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                cursor = text.len();
-                            }
-                            continue;
-                        }
-                        cursor = (cursor as i32 + 1).min(text.len() as i32) as usize;
+                        Text::move_right(&mut cursor, &mut text, &key_event);
+                        continue;
                     }
                     KeyCode::Esc => {
                         if is_selecting_suggestion {
                             is_selecting_suggestion = false;
                             continue;
                         }
-                        Text::render_finish(
+                        render_prompt(
                             &mut stdout,
                             &self.message,
-                            &hint,
+                            &self.hint,
                             "<canceled>",
                             Color::Red,
                             None,
+                            true,
                         )?;
-                        crossterm::execute!(stdout, cursor::SetCursorStyle::DefaultUserShape)
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        crossterm::terminal::disable_raw_mode()
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        return Err(UIError::Canceled);
+                        cleanup_terminal(&mut stdout, true)?;
                     }
                     _ => {
                         continue;
@@ -613,52 +674,23 @@ impl<'a> Text<'a> {
             }
         }
 
-        Text::render_finish(
+        render_prompt(
             &mut stdout,
             &self.message,
-            &hint,
+            &self.hint,
             &text,
             Color::Green,
             Some(
                 Attributes::default()
-                    .with(Attribute::Bold)
-                    .with(Attribute::Underlined),
+                    .with(Attribute::Underlined)
+                    .with(Attribute::Bold),
             ),
+            true,
         )?;
 
-        crossterm::execute!(stdout, cursor::SetCursorStyle::DefaultUserShape)
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
+        cleanup_terminal(&mut stdout, false)?;
 
         Ok(text)
-    }
-
-    fn render_finish(
-        stdout: &mut Stdout,
-        message: &'a str,
-        hint: &'a StyledContent<String>,
-        text: &str,
-        color: Color,
-        attributes: Option<Attributes>,
-    ) -> Result<(), UIError> {
-        crossterm::execute!(
-            stdout,
-            MoveToColumn(0),
-            Clear(terminal::ClearType::FromCursorDown),
-            Print(&message),
-            Print(&hint),
-            Print(": "),
-            SetAttributes(if attributes.is_some() {
-                attributes.unwrap()
-            } else {
-                Attributes::default()
-            }),
-            SetForegroundColor(color),
-            Print(format!("{}\n", text)),
-            MoveToColumn(0),
-            ResetColor,
-        )
-        .map_err(|e| UIError::Terminal(e.to_string()))
     }
 }
 
@@ -811,15 +843,6 @@ impl<'a, T> Select<'a, T> {
 
         let mut max_page_index;
 
-        let hint = match &self.hint {
-            Some(hint) => format!(" [{}]", hint),
-            None => "".to_string(),
-        };
-
-        let prompt = format!("{}{}: ", &self.message, &hint);
-
-        let hint = hint.cyan().italic();
-
         crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
         crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
             .map_err(|e| UIError::Terminal(e.to_string()))?;
@@ -868,7 +891,7 @@ impl<'a, T> Select<'a, T> {
                     page_index += 1;
                 } else {
                     selected_index = (item_slice.len() - 1) as i64;
-                    continue
+                    continue;
                 }
                 selected_index = 0;
                 continue;
@@ -904,18 +927,34 @@ impl<'a, T> Select<'a, T> {
                 String::new()
             };
 
+            let prompt_len = render_prompt(
+                &mut stdout,
+                &self.message,
+                &self.hint,
+                if !filter_mode && filter.is_empty() {
+                    "Type to Filter"
+                } else {
+                    &filter
+                },
+                if !filter_mode && filter.is_empty() {
+                    Color::DarkCyan
+                } else {
+                    Color::Reset
+                },
+                if !filter_mode && filter.is_empty() {
+                    Some(
+                        Attributes::default()
+                            .with(Attribute::Dim)
+                            .with(Attribute::Italic),
+                    )
+                } else {
+                    None
+                },
+                false,
+            )?;
+
             crossterm::queue!(
                 stdout,
-                MoveToColumn(0),
-                Clear(terminal::ClearType::FromCursorDown),
-                Print(&self.message),
-                Print(&hint),
-                Print(": "),
-                Print(if !filter_mode && filter.is_empty() {
-                    "Type to filter".to_string().dim().italic().dark_cyan()
-                } else {
-                    filter.clone().reset()
-                }),
                 MoveToNextLine(
                     (self
                         .page_size
@@ -996,7 +1035,7 @@ impl<'a, T> Select<'a, T> {
             crossterm::queue!(
                 stdout,
                 MoveUp(height as u16),
-                MoveToColumn((prompt.len() + filter_cursor) as u16)
+                MoveToColumn((prompt_len + filter_cursor) as u16)
             )
             .map_err(|e| UIError::Other(e.to_string()))?;
 
@@ -1017,11 +1056,13 @@ impl<'a, T> Select<'a, T> {
                     KeyCode::Up | KeyCode::BackTab => selected_index -= 1,
                     KeyCode::Down | KeyCode::Tab => {
                         selected_index += 1;
-                        if selected_index >= (item_slice.len()) as i64 && page_index == max_page_index {
+                        if selected_index >= (item_slice.len()) as i64
+                            && page_index == max_page_index
+                        {
                             page_index = 0;
                             selected_index = 0;
                         }
-                    },
+                    }
                     KeyCode::Enter => {
                         if result == 0 {
                             continue;
@@ -1037,117 +1078,54 @@ impl<'a, T> Select<'a, T> {
                             filter_cursor = 0;
                             continue;
                         }
-                        Select::<T>::render_finish(
+                        render_prompt(
                             &mut stdout,
                             &self.message,
-                            &hint,
+                            &self.hint,
                             "<canceled>",
                             Color::Red,
                             None,
+                            false,
                         )?;
-                        crossterm::execute!(
-                            stdout,
-                            cursor::SetCursorStyle::DefaultUserShape,
-                            cursor::Show
-                        )
-                        .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        crossterm::terminal::disable_raw_mode()
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        return Err(UIError::Canceled);
+                        cleanup_terminal(&mut stdout, true)?;
                     }
                     KeyCode::Char(c) => {
                         if key_event.modifiers == KeyModifiers::CONTROL {
                             if c == 'h' && self.filter_input {
-                                let end = filter_cursor;
-                                let mut in_word = true;
-                                for (i, c) in filter.chars().rev().enumerate() {
-                                    if filter.len() - i < filter_cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                filter_cursor = filter.len() - i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    filter_cursor = 0;
-                                }
-                                filter.replace_range(filter_cursor..end, "");
+                                Text::delete_word_back(&mut filter_cursor, &mut filter);
                                 continue;
                             } else if c == 'c' {
-                                Select::<T>::render_finish(
+                                render_prompt(
                                     &mut stdout,
                                     &self.message,
-                                    &hint,
+                                    &self.hint,
                                     "<interupted>",
                                     Color::Red,
                                     None,
+                                    false,
                                 )?;
-                                crossterm::execute!(
-                                    stdout,
-                                    cursor::SetCursorStyle::DefaultUserShape,
-                                    cursor::Show
-                                )
-                                .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                crossterm::terminal::disable_raw_mode()
-                                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                return Err(UIError::Canceled);
+                                cleanup_terminal(&mut stdout, true)?;
                             }
                         }
                         if !self.filter_input {
                             continue;
                         }
                         filter_mode = true;
-                        filter.insert(filter_cursor, c);
-                        filter_cursor += 1;
+                        Text::type_char(&mut filter_cursor, &mut filter, c);
                     }
                     KeyCode::Backspace => {
                         if !self.filter_input {
                             continue;
                         }
                         filter_mode = true;
-                        if filter_cursor > 0 {
-                            filter.remove(filter_cursor - 1);
-                            filter_cursor = (filter_cursor as i32 - 1).max(0) as usize;
-                        }
+                        Text::delete_char_back(&mut filter_cursor, &mut filter);
                     }
                     KeyCode::Delete => {
                         if !self.filter_input {
                             continue;
                         }
                         filter_mode = true;
-                        if filter_cursor < filter.len() {
-                            if key_event.modifiers == KeyModifiers::CONTROL {
-                                let start = filter_cursor;
-                                let mut in_word = true;
-                                for (i, c) in filter.chars().enumerate() {
-                                    if i > filter_cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                filter_cursor = i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    filter_cursor = filter.len();
-                                }
-                                filter.replace_range(start..filter_cursor, "");
-                                filter_cursor = start;
-                                continue;
-                            }
-                            filter.remove(filter_cursor);
-                        }
+                        Text::delete_front(&mut filter_cursor, &mut filter, &key_event);
                     }
                     KeyCode::Left => {
                         if !filter_mode || filter.is_empty() {
@@ -1158,28 +1136,7 @@ impl<'a, T> Select<'a, T> {
                             page_index = (page_index as i64 - 1) as usize;
                             continue;
                         }
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in filter.chars().rev().enumerate() {
-                                if filter.len() - i <= filter_cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            filter_cursor = filter.len() - i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                filter_cursor = 0;
-                            }
-                            continue;
-                        }
-                        filter_cursor = (filter_cursor as i32 - 1).max(0) as usize;
+                        Text::move_left(&mut filter_cursor, &mut filter, &key_event);
                     }
                     KeyCode::Right => {
                         if !filter_mode || filter.is_empty() {
@@ -1189,29 +1146,7 @@ impl<'a, T> Select<'a, T> {
                             }
                             continue;
                         }
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in filter.chars().enumerate() {
-                                if i >= filter_cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            filter_cursor = i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                filter_cursor = filter.len();
-                            }
-                            continue;
-                        }
-                        filter_cursor =
-                            (filter_cursor as i32 + 1).min(filter.len() as i32) as usize;
+                        Text::move_right(&mut filter_cursor, &mut filter, &key_event);
                     }
                     _ => {}
                 }
@@ -1221,10 +1156,10 @@ impl<'a, T> Select<'a, T> {
         let selected_item_index = items[page_ranges[page_index].clone()][selected_index as usize];
         let selected_item = self.items.swap_remove(selected_item_index).data;
 
-        Select::<T>::render_finish(
+        render_prompt(
             &mut stdout,
             &self.message,
-            &hint,
+            &self.hint,
             &(self.formatter)(&selected_item),
             Color::Green,
             Some(
@@ -1232,45 +1167,12 @@ impl<'a, T> Select<'a, T> {
                     .with(Attribute::Bold)
                     .with(Attribute::Underlined),
             ),
+            true,
         )?;
 
-        crossterm::execute!(
-            stdout,
-            cursor::SetCursorStyle::DefaultUserShape,
-            cursor::Show
-        )
-        .map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
+        cleanup_terminal(&mut stdout, false)?;
 
         Ok((selected_item_index, selected_item))
-    }
-
-    fn render_finish(
-        stdout: &mut Stdout,
-        message: &'a str,
-        hint: &'a StyledContent<String>,
-        text: &str,
-        color: Color,
-        attributes: Option<Attributes>,
-    ) -> Result<(), UIError> {
-        crossterm::execute!(
-            stdout,
-            MoveToColumn(0),
-            Clear(terminal::ClearType::FromCursorDown),
-            Print(&message),
-            Print(&hint),
-            Print(": "),
-            SetAttributes(if attributes.is_some() {
-                attributes.unwrap()
-            } else {
-                Attributes::default()
-            }),
-            SetForegroundColor(color),
-            Print(format!("{}\n", text)),
-            MoveToColumn(0),
-            ResetColor,
-        )
-        .map_err(|e| UIError::Terminal(e.to_string()))
     }
 }
 
@@ -1467,7 +1369,8 @@ impl<'a, T> MultiSelect<'a, T> {
             page_index = page_index.clamp(0, max_page_index);
 
             let item_slice = &items[page_ranges[page_index].clone()];
-            let min_height = item_slice.len() + self.count_group(item_slice.iter().map(|&i| &self.items[i]).collect());
+            let min_height = item_slice.len()
+                + self.count_group(item_slice.iter().map(|&i| &self.items[i]).collect());
             let height = self
                 .page_size
                 .unwrap_or(&self.items.len() + base_group_count)
@@ -1651,11 +1554,13 @@ impl<'a, T> MultiSelect<'a, T> {
                     KeyCode::Up | KeyCode::BackTab => selected_index -= 1,
                     KeyCode::Down | KeyCode::Tab => {
                         selected_index += 1;
-                        if selected_index >= (item_slice.len()) as i64 && page_index == max_page_index {
+                        if selected_index >= (item_slice.len()) as i64
+                            && page_index == max_page_index
+                        {
                             page_index = 0;
                             selected_index = 0;
                         }
-                    },
+                    }
                     KeyCode::Enter => {
                         if result == 0 {
                             continue;
@@ -1671,23 +1576,16 @@ impl<'a, T> MultiSelect<'a, T> {
                             filter_cursor = 0;
                             continue;
                         }
-                        Select::<T>::render_finish(
+                        render_prompt(
                             &mut stdout,
                             &self.message,
-                            &hint,
+                            &self.hint,
                             "<canceled>",
                             Color::Red,
                             None,
+                            false,
                         )?;
-                        crossterm::execute!(
-                            stdout,
-                            cursor::SetCursorStyle::DefaultUserShape,
-                            cursor::Show
-                        )
-                        .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        crossterm::terminal::disable_raw_mode()
-                            .map_err(|e| UIError::Terminal(e.to_string()))?;
-                        return Err(UIError::Canceled);
+                        cleanup_terminal(&mut stdout, true)?;
                     }
                     KeyCode::Char(c) => {
                         if key_event.modifiers == KeyModifiers::CONTROL {
@@ -1714,23 +1612,16 @@ impl<'a, T> MultiSelect<'a, T> {
                                 filter.replace_range(filter_cursor..end, "");
                                 continue;
                             } else if c == 'c' {
-                                Select::<T>::render_finish(
+                                render_prompt(
                                     &mut stdout,
                                     &self.message,
-                                    &hint,
+                                    &self.hint,
                                     "<interupted>",
                                     Color::Red,
                                     None,
+                                    false,
                                 )?;
-                                crossterm::execute!(
-                                    stdout,
-                                    cursor::SetCursorStyle::DefaultUserShape,
-                                    cursor::Show
-                                )
-                                .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                crossterm::terminal::disable_raw_mode()
-                                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-                                return Err(UIError::Canceled);
+                                cleanup_terminal(&mut stdout, true)?;
                             }
                         }
                         if !self.filter_input {
@@ -1870,10 +1761,10 @@ impl<'a, T> MultiSelect<'a, T> {
                 .map(|(i, item)| (i, item.data))
                 .partition(|(i, _)| selected_indices.contains(i));
 
-        Select::<T>::render_finish(
+        render_prompt(
             &mut stdout,
             &self.message,
-            &hint,
+            &self.hint,
             &format!("Selected {} out of {}", selected_items.len(), list_size),
             Color::Green,
             Some(
@@ -1881,15 +1772,10 @@ impl<'a, T> MultiSelect<'a, T> {
                     .with(Attribute::Bold)
                     .with(Attribute::Underlined),
             ),
+            true,
         )?;
 
-        crossterm::execute!(
-            stdout,
-            cursor::SetCursorStyle::DefaultUserShape,
-            cursor::Show
-        )
-        .map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
+        cleanup_terminal(&mut stdout, false)?;
 
         let result = MultiSelectResult {
             selected: selected_items,
