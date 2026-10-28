@@ -1,19 +1,29 @@
 use std::{
     collections::HashSet,
+    i128::MAX,
     io::{Stdout, Write, stdout},
     ops::Range,
 };
 
 use crossterm::{
-    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveUp},
+    Command,
+    cursor::{self, MoveDown, MoveLeft, MoveRight, MoveToColumn, MoveToNextLine, MoveUp},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetBackgroundColor,
-        SetForegroundColor, StyledContent, Stylize,
+        SetForegroundColor, Stylize,
     },
     terminal::{self, Clear, ScrollUp},
 };
+
+struct NoOp;
+
+impl Command for NoOp {
+    fn write_ansi(&self, _: &mut impl std::fmt::Write) -> std::fmt::Result {
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum UIError {
@@ -36,10 +46,9 @@ fn render_prompt(
     attributes: Option<Attributes>,
     new_line: bool,
 ) -> Result<usize, UIError> {
-    let hint = if hint.as_ref().is_some_and(|h| !h.is_empty()) {
-        format!("[{}]", hint.as_ref().unwrap()).cyan().to_string()
-    } else {
-        String::new()
+    let hint = match hint.as_ref() {
+        Some(hint) if !hint.is_empty() => format!("[{}]", hint).cyan().to_string(),
+        _ => String::new(),
     };
     let prompt = format!("{} {} {}: ", "?".to_string().green(), &message, &hint);
     crossterm::execute!(
@@ -49,10 +58,9 @@ fn render_prompt(
         SetAttribute(Attribute::Bold),
         Print(&prompt),
         SetAttribute(Attribute::Reset),
-        SetAttributes(if attributes.is_some() {
-            attributes.unwrap()
-        } else {
-            Attributes::default()
+        SetAttributes(match attributes {
+            Some(_) => attributes.unwrap(),
+            None => Attributes::default(),
         }),
         SetForegroundColor(color),
         Print(format!("{}{}", text, if new_line { "\n" } else { "" })),
@@ -418,34 +426,40 @@ impl<'a> Text<'a> {
 
             if let Some(suggestions) = &matches {
                 let max_height = self.max_suggestions;
-                let height = if max_height.is_some() {
-                    max_height.unwrap().min(suggestions.len())
-                } else {
-                    suggestions.len()
+                let height = match max_height {
+                    Some(max_height) => max_height.min(suggestions.len()),
+                    None => suggestions.len(),
                 };
                 if selected_suggestion >= (selection_scroll + height) as i64 {
-                    if selected_suggestion < suggestions.len() as i64
-                        && max_height
-                            .is_some_and(|m| selected_suggestion >= (selection_scroll + m) as i64)
-                    {
-                        selection_scroll = (selected_suggestion as usize / max_height.unwrap())
-                            * max_height.unwrap()
-                    } else {
-                        selected_suggestion = 0;
-                        selection_scroll = 0;
+                    match max_height {
+                        Some(max_height)
+                            if selected_suggestion >= (selection_scroll + max_height) as i64 =>
+                        {
+                            if selected_suggestion < suggestions.len() as i64 {
+                                selection_scroll =
+                                    (selected_suggestion as usize / max_height) * max_height
+                            }
+                        }
+                        _ => {
+                            selected_suggestion = 0;
+                            selection_scroll = 0;
+                        }
                     }
                 } else if selected_suggestion < selection_scroll as i64 {
-                    if selected_suggestion >= 0
-                        && max_height.is_some()
-                        && selected_suggestion < selection_scroll as i64
-                    {
-                        selection_scroll = (selected_suggestion as usize / max_height.unwrap())
-                            * max_height.unwrap()
-                    } else {
-                        selected_suggestion = suggestions.len() as i64 - 1;
-                        if max_height.is_some() {
-                            selection_scroll = (selected_suggestion as usize / max_height.unwrap())
-                                * max_height.unwrap()
+                    match max_height {
+                        Some(max_height)
+                            if selected_suggestion >= 0
+                                && selected_suggestion < selection_scroll as i64 =>
+                        {
+                            selection_scroll =
+                                (selected_suggestion as usize / max_height) * max_height
+                        }
+                        _ => {
+                            selected_suggestion = suggestions.len() as i64 - 1;
+                            if let Some(max_height) = max_height {
+                                selection_scroll =
+                                    (selected_suggestion as usize / max_height) * max_height
+                            };
                         }
                     }
                 }
@@ -468,9 +482,8 @@ impl<'a> Text<'a> {
                 }
 
                 for (i, s) in suggestions.iter().enumerate() {
-                    if self
-                        .max_suggestions
-                        .is_some_and(|m| !(selection_scroll..(selection_scroll + m)).contains(&i))
+                    if let Some(max_suggestions) = self.max_suggestions
+                        && !(selection_scroll..(selection_scroll + max_suggestions)).contains(&i)
                     {
                         continue;
                     }
@@ -489,15 +502,19 @@ impl<'a> Text<'a> {
                     } else {
                         Attribute::Dim
                     };
-                    let scroll_color = if max_height.is_some_and(|m| {
-                        (i - selection_scroll)
-                            == ((selection_scroll as f64
-                                / ((suggestions.len() / m) as f64 * m as f64 - m as f64))
-                                * (m - 1) as f64) as usize
-                    }) {
-                        Color::White
-                    } else {
-                        Color::DarkGrey
+                    let scroll_color = match max_height {
+                        Some(max_height)
+                            if (i - selection_scroll)
+                                == ((selection_scroll as f64
+                                    / ((suggestions.len() / max_height) as f64
+                                        * max_height as f64
+                                        - max_height as f64))
+                                    * (max_height - 1) as f64)
+                                    as usize =>
+                        {
+                            Color::White
+                        }
+                        _ => Color::DarkGrey,
                     };
                     crossterm::queue!(
                         stdout,
@@ -519,10 +536,9 @@ impl<'a> Text<'a> {
                         SetForegroundColor(scroll_color),
                         Print(format!(
                             "{}",
-                            if max_height.is_some_and(|m| suggestions.len() >= m) {
-                                "▌"
-                            } else {
-                                ""
+                            match max_height {
+                                Some(m) if suggestions.len() >= m => "▌",
+                                _ => "",
                             }
                         )),
                         SetAttribute(Attribute::Reset),
@@ -696,6 +712,7 @@ impl<'a> Text<'a> {
 
 struct SelectItem<T> {
     data: T,
+    disabled: bool,
     group: Option<String>,
 }
 
@@ -703,12 +720,32 @@ pub struct Select<'a, T> {
     message: &'a str,
     items: Vec<SelectItem<&'a mut T>>,
     formatter: fn(&T) -> String,
+    selected_color: Color,
     group_items: bool,
+    disabled_items: Vec<usize>,
     hint: Option<String>,
     page_size: Option<usize>,
-    initial_selection: usize,
+    initial_selections: Vec<usize>,
     filter_input: bool,
     initial_filter: String,
+    multi_selection: bool,
+}
+
+pub struct SelectResult<'a, T> {
+    pub selected: Vec<(usize, &'a mut T)>,
+    pub unselected: Vec<(usize, &'a mut T)>,
+}
+
+impl<'a, T> SelectResult<'a, T> {
+    pub fn data(&'a self) -> &'a T {
+        self.selected[0].1
+    }
+    pub fn data_mut(&'a mut self) -> &'a mut T {
+        self.selected[0].1
+    }
+    pub fn index(&'a self) -> usize {
+        self.selected[0].0
+    }
 }
 
 impl<'a, T> Select<'a, T> {
@@ -717,17 +754,30 @@ impl<'a, T> Select<'a, T> {
             message,
             items: Vec::new(),
             formatter,
-            group_items: false,
+            selected_color: Color::Green,
             hint: None,
+            group_items: false,
+            disabled_items: Vec::new(),
             page_size: None,
-            initial_selection: 0,
+            initial_selections: Vec::new(),
             filter_input: true,
             initial_filter: String::new(),
+            multi_selection: false,
         }
+    }
+
+    pub fn with_multi_selection(mut self, multi_selection: bool) -> Self {
+        self.multi_selection = multi_selection;
+        self
     }
 
     pub fn with_group_items(mut self, group_items: bool) -> Self {
         self.group_items = group_items;
+        self
+    }
+
+    pub fn with_selected_color(mut self, selected_color: Color) -> Self {
+        self.selected_color = selected_color;
         self
     }
 
@@ -741,8 +791,8 @@ impl<'a, T> Select<'a, T> {
         self
     }
 
-    pub fn with_initial_selection(mut self, initial_selection: usize) -> Self {
-        self.initial_selection = initial_selection;
+    pub fn with_initial_selection(mut self, initial_selection: Vec<usize>) -> Self {
+        self.initial_selections = initial_selection;
         self
     }
 
@@ -756,21 +806,26 @@ impl<'a, T> Select<'a, T> {
         self
     }
 
-    pub fn add_items(&mut self, items: Vec<&'a mut T>, group: Option<&str>) {
-        self.items.append(
-            &mut items
-                .into_iter()
-                .map(|item| SelectItem {
-                    data: item,
-                    group: group.map(|g| g.to_string()),
-                })
-                .collect(),
-        );
+    pub fn with_disabled_items(mut self, disabled_items: Vec<usize>) -> Self {
+        self.disabled_items = disabled_items.to_vec();
+        self
+    }
+
+    pub fn add_items(&mut self, items: &'a mut [T], group: Option<&str>) {
+        for item in items.iter_mut() {
+            let select_item = SelectItem {
+                data: item,
+                disabled: false,
+                group: group.map(|g| g.to_string()),
+            };
+            self.items.push(select_item)
+        }
     }
 
     pub fn add_item(&mut self, item: &'a mut T, group: Option<&str>) {
         self.items.push(SelectItem {
             data: item,
+            disabled: false,
             group: group.map(|g| g.to_string()),
         });
     }
@@ -788,7 +843,88 @@ impl<'a, T> Select<'a, T> {
         }
     }
 
-    pub fn prompt(mut self) -> Result<(usize, &'a mut T), UIError> {
+    fn match_filter(&self, item: &SelectItem<&'a mut T>, filter: &str) -> bool {
+        match &item.group {
+            Some(group) if filter.starts_with("%") => {
+                let mut group_filter = Vec::new();
+                let mut item_filter = Vec::new();
+                let mut group_mode = true;
+                for word in filter.split_whitespace() {
+                    if word == "-" {
+                        group_mode = false;
+                        continue;
+                    }
+                    if group_mode {
+                        group_filter.push(word);
+                    } else {
+                        item_filter.push(word);
+                    }
+                }
+                let group_filter = group_filter.join("");
+                let item_filter = item_filter.join("");
+                group.to_lowercase().replace(" ", "").contains(
+                    &group_filter
+                        .strip_prefix("%")
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .replace(" ", ""),
+                ) && ((self.formatter)(&item.data)
+                    .to_lowercase()
+                    .replace(" ", "")
+                    .contains(&item_filter.to_lowercase().replace(" ", ""))
+                    || item_filter.is_empty())
+            }
+            _ => (self.formatter)(&item.data)
+                .to_lowercase()
+                .replace(" ", "")
+                .contains(&filter.to_lowercase().replace(" ", "")),
+        }
+    }
+
+    fn calculate_page_ranges(
+        &self,
+        page_size: &Option<usize>,
+        items: &Vec<usize>,
+        page_ranges: &mut Vec<Range<usize>>,
+    ) {
+        page_ranges.clear();
+        match page_size {
+            Some(page_size) => {
+                let mut group = None;
+                let mut item_count: usize = 0;
+                let mut start = 0;
+                let mut end = 0;
+                for &i in items.iter() {
+                    if self.group_items && self.items[i].group != group {
+                        group = self.items[i].group.clone();
+                        item_count += 1;
+                    }
+                    if item_count >= *page_size {
+                        page_ranges.push(start..end);
+                        item_count = 0;
+                        group = None;
+                        start = end
+                    }
+                    item_count += 1;
+                    end += 1;
+                    if item_count >= *page_size {
+                        page_ranges.push(start..end);
+                        item_count = 0;
+                        group = None;
+                        start = end
+                    }
+                }
+                if start != end {
+                    page_ranges.push(start..end);
+                }
+            }
+            None => {
+                page_ranges.push(0..items.len());
+            }
+        }
+    }
+
+    pub fn prompt(self) -> Result<SelectResult<'a, T>, UIError> {
         let mut stdout = stdout();
         let mut filter = self.initial_filter.clone();
         let mut filter_cursor = 0;
@@ -796,50 +932,9 @@ impl<'a, T> Select<'a, T> {
         let mut page_index = 0;
         let mut page_ranges: Vec<Range<usize>> = Vec::new();
         let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
+        let mut direction = 0;
 
-        let match_filter = |item: &SelectItem<&'a mut T>, filter: &str| -> bool {
-            (self.formatter)(&item.data)
-                .to_lowercase()
-                .contains(&filter.to_lowercase())
-        };
-
-        let mut items: Vec<usize> = self.items.iter().enumerate().map(|(i, _)| i).collect();
-
-        let calculate_page_ranges =
-            |page_size: &Option<usize>, items: &Vec<usize>, page_ranges: &mut Vec<Range<usize>>| {
-                page_ranges.clear();
-                if page_size.is_some() {
-                    let mut group = None;
-                    let mut item_count: usize = 0;
-                    let mut start = 0;
-                    let mut end = 0;
-                    for &i in items.iter() {
-                        if self.group_items && self.items[i].group != group {
-                            group = self.items[i].group.clone();
-                            item_count += 1;
-                        }
-                        if item_count >= self.page_size.unwrap() {
-                            page_ranges.push(start..end);
-                            item_count = 0;
-                            group = None;
-                            start = end
-                        }
-                        item_count += 1;
-                        end += 1;
-                        if item_count >= self.page_size.unwrap() {
-                            page_ranges.push(start..end);
-                            item_count = 0;
-                            group = None;
-                            start = end
-                        }
-                    }
-                    page_ranges.push(start..end);
-                } else {
-                    page_ranges.push(0..items.len());
-                }
-            };
-
-        calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
+        let mut items;
 
         let mut max_page_index;
 
@@ -847,7 +942,18 @@ impl<'a, T> Select<'a, T> {
         crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
             .map_err(|e| UIError::Terminal(e.to_string()))?;
 
-        let mut selected_index: i64 = self.initial_selection as i64;
+        let mut selected_index: i64 = 0;
+        let mut selected_indices: HashSet<usize> = if self.multi_selection {
+            self.initial_selections.iter().cloned().collect()
+        } else {
+            HashSet::new()
+        };
+
+        let toggling_hint = if self.multi_selection {
+            "| [Space] Toggle "
+        } else {
+            ""
+        };
 
         loop {
             items = self
@@ -855,7 +961,7 @@ impl<'a, T> Select<'a, T> {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, item)| {
-                    if match_filter(item, &filter) {
+                    if self.match_filter(item, &filter) {
                         Some(i)
                     } else {
                         None
@@ -863,12 +969,14 @@ impl<'a, T> Select<'a, T> {
                 })
                 .collect();
 
-            calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
+            self.calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
 
-            max_page_index = page_ranges.len() - 1;
+            max_page_index = (page_ranges.len() as i64 - 1).max(0) as usize;
             page_index = page_index.clamp(0, max_page_index);
 
-            let item_slice = &items[page_ranges[page_index].clone()];
+            let item_slice = &items
+                .get(page_ranges.get(page_index).unwrap_or(&(0..0)).clone())
+                .unwrap_or(&[]);
             let min_height = item_slice.len()
                 + self.count_group(item_slice.iter().map(|&i| &self.items[i]).collect());
             let height = self
@@ -889,13 +997,19 @@ impl<'a, T> Select<'a, T> {
             } else if selected_index >= item_slice.len() as i64 {
                 if page_index < max_page_index {
                     page_index += 1;
+                    selected_index = 0;
                 } else {
+                    if direction > 0 {
+                        page_index = 0;
+                        selected_index = 0;
+                        continue;
+                    }
                     selected_index = (item_slice.len() - 1) as i64;
-                    continue;
                 }
-                selected_index = 0;
                 continue;
             }
+
+            direction = 0;
 
             let (_, cy) = cursor::position().map_err(|e| UIError::Terminal(e.to_string()))?;
             let (_, th) = terminal::size().map_err(|e| UIError::Terminal(e.to_string()))?;
@@ -921,10 +1035,9 @@ impl<'a, T> Select<'a, T> {
                     .map_err(|e| UIError::Terminal(e.to_string()))?;
             }
 
-            let page = if self.page_size.is_some() {
-                format!("Page {}/{} | ", page_index + 1, max_page_index + 1)
-            } else {
-                String::new()
+            let page = match self.page_size {
+                Some(_) => format!("Page {}/{} | ", page_index + 1, max_page_index + 1),
+                None => String::new(),
             };
 
             let prompt_len = render_prompt(
@@ -963,14 +1076,20 @@ impl<'a, T> Select<'a, T> {
                 ),
                 SetForegroundColor(Color::Cyan),
                 if filter_mode {
-                    Print(format!("| {}Mode: Typing Filter | [Esc] exit typing", page))
+                    Print(format!(
+                        "| {}Mode: Typing Filter {}| [Esc] exit typing",
+                        page, toggling_hint
+                    ))
                 } else if !filter.is_empty() {
                     Print(format!(
-                        "| {}Mode: Filter        | [Esc] clear filter",
-                        page
+                        "| {}Mode: Filter        {}| [Esc] clear filter",
+                        page, toggling_hint
                     ))
                 } else {
-                    Print(format!("| {}Mode: Normal        | [Esc] cancel", page))
+                    Print(format!(
+                        "| {}Mode: Normal        {}| [Esc] cancel",
+                        page, toggling_hint
+                    ))
                 },
                 ResetColor,
                 MoveUp(
@@ -985,7 +1104,12 @@ impl<'a, T> Select<'a, T> {
             let mut group = None;
             let mut result = 0;
 
-            for (i, &item_i) in items[page_ranges[page_index].clone()].iter().enumerate() {
+            for (i, &item_i) in items
+                .get(page_ranges.get(page_index).unwrap_or(&(0..0)).clone())
+                .unwrap_or(&[])
+                .iter()
+                .enumerate()
+            {
                 let item = &self.items[item_i];
                 result += 1;
                 if self.group_items {
@@ -1009,8 +1133,12 @@ impl<'a, T> Select<'a, T> {
                 }
                 let selected = i == selected_index as usize;
                 let item_string = (self.formatter)(&item.data);
+                let toggled = selected_indices.contains(&item_i);
+                let toggled_str = if toggled { "✔" } else { " " };
                 let color = if selected {
                     Color::Yellow
+                } else if toggled {
+                    self.selected_color
                 } else {
                     Color::Reset
                 };
@@ -1019,17 +1147,62 @@ impl<'a, T> Select<'a, T> {
                 } else {
                     Attributes::none()
                 };
+                let disabled = self.disabled_items.contains(&item_i);
+                let item_string_formatted = format!(
+                    "{}{}",
+                    if self.multi_selection {
+                        format!("[{}] ", toggled_str)
+                    } else {
+                        String::new()
+                    },
+                    item_string
+                );
+                let item_string_formatted = if disabled {
+                    item_string_formatted.reset().dim().to_string()
+                } else {
+                    item_string_formatted
+                };
                 crossterm::queue!(
                     stdout,
                     MoveToNextLine(1),
                     SetAttributes(attributes),
                     SetForegroundColor(color),
-                    Print(if selected { "  > " } else { "    " }),
-                    Print(format!("{}", item_string)),
+                    Print(if selected {
+                        format!("  > ")
+                    } else {
+                        format!("    ")
+                    }),
+                    Print(format!("{}", item_string_formatted)),
                     SetAttribute(Attribute::Reset),
                     ResetColor,
                 )
                 .map_err(|e| UIError::Other(e.to_string()))?;
+                if filter_mode && !filter.is_empty() {
+                    let mut filter = filter.clone();
+                    if filter.starts_with("%") {
+                        if let Some((_, right)) = filter.split_once("-") {
+                            filter = right.trim().to_string();
+                        }
+                    }
+                    let start = item_string.to_lowercase().find(&filter.to_lowercase());
+                    let start = match start {
+                        Some(start) => start,
+                        None => continue,
+                    };
+                    let end = filter.len() + start;
+                    crossterm::queue!(
+                        stdout,
+                        MoveLeft((item_string.len() + (if start == 0 { 1 } else { 0 })) as u16),
+                        MoveRight(start as u16),
+                        SetAttribute(Attribute::Bold),
+                        SetForegroundColor(Color::Black),
+                        SetBackgroundColor(Color::Cyan),
+                        Print(&item_string[start..end]),
+                        SetAttribute(Attribute::Reset),
+                        ResetColor,
+                    )
+                    .map_err(|e| UIError::Other(e.to_string()))?;
+                }
             }
 
             crossterm::queue!(
@@ -1053,19 +1226,35 @@ impl<'a, T> Select<'a, T> {
                     continue;
                 }
                 match key_event.code {
-                    KeyCode::Up | KeyCode::BackTab => selected_index -= 1,
+                    KeyCode::Up | KeyCode::BackTab => {
+                        selected_index -= 1;
+                        direction = -1;
+                        filter_mode = false
+                    }
                     KeyCode::Down | KeyCode::Tab => {
                         selected_index += 1;
-                        if selected_index >= (item_slice.len()) as i64
-                            && page_index == max_page_index
-                        {
-                            page_index = 0;
-                            selected_index = 0;
-                        }
+                        direction = 1;
+                        filter_mode = false
                     }
                     KeyCode::Enter => {
                         if result == 0 {
                             continue;
+                        }
+                        if let Some(index) = &item_slice.get(selected_index as usize)
+                            && self.disabled_items.contains(&index)
+                        {
+                            continue;
+                        }
+                        if !self.multi_selection {
+                            selected_indices.clear();
+                            selected_indices.insert(
+                                items[page_ranges[page_index].clone()][selected_index as usize],
+                            );
+                        } else {
+                            if filter_mode {
+                                filter_mode = false;
+                                continue;
+                            }
                         }
                         break;
                     }
@@ -1085,7 +1274,7 @@ impl<'a, T> Select<'a, T> {
                             "<canceled>",
                             Color::Red,
                             None,
-                            false,
+                            true,
                         )?;
                         cleanup_terminal(&mut stdout, true)?;
                     }
@@ -1105,9 +1294,36 @@ impl<'a, T> Select<'a, T> {
                                     false,
                                 )?;
                                 cleanup_terminal(&mut stdout, true)?;
+                            } else if c == 'a' && self.multi_selection {
+                                for i in &items {
+                                    selected_indices.insert(*i);
+                                }
+                                continue;
+                            } else if c == 'd' && self.multi_selection {
+                                for i in &items {
+                                    selected_indices.remove(i);
+                                }
+                                continue;
                             }
                         }
                         if !self.filter_input {
+                            continue;
+                        }
+                        if c == ' ' && !filter_mode && !items.is_empty() {
+                            if !self.multi_selection {
+                                continue;
+                            } else if let Some(index) = &item_slice.get(selected_index as usize)
+                                && self.disabled_items.contains(&index)
+                            {
+                                continue;
+                            }
+                            let to_toggle =
+                                items[page_ranges[page_index].clone()][selected_index as usize];
+                            if selected_indices.contains(&to_toggle) {
+                                selected_indices.remove(&to_toggle);
+                            } else {
+                                selected_indices.insert(to_toggle);
+                            }
                             continue;
                         }
                         filter_mode = true;
@@ -1153,606 +1369,6 @@ impl<'a, T> Select<'a, T> {
             }
         }
 
-        let selected_item_index = items[page_ranges[page_index].clone()][selected_index as usize];
-        let selected_item = self.items.swap_remove(selected_item_index).data;
-
-        render_prompt(
-            &mut stdout,
-            &self.message,
-            &self.hint,
-            &(self.formatter)(&selected_item),
-            Color::Green,
-            Some(
-                Attributes::default()
-                    .with(Attribute::Bold)
-                    .with(Attribute::Underlined),
-            ),
-            true,
-        )?;
-
-        cleanup_terminal(&mut stdout, false)?;
-
-        Ok((selected_item_index, selected_item))
-    }
-}
-
-pub struct MultiSelect<'a, T> {
-    message: &'a str,
-    items: Vec<SelectItem<&'a mut T>>,
-    formatter: fn(&T) -> String,
-    selected_color: Color,
-    group_items: bool,
-    hint: Option<String>,
-    page_size: Option<usize>,
-    initial_selections: Vec<usize>,
-    filter_input: bool,
-    initial_filter: String,
-}
-
-pub struct MultiSelectResult<'a, T> {
-    pub selected: Vec<(usize, &'a mut T)>,
-    pub unselected: Vec<(usize, &'a mut T)>,
-}
-
-impl<'a, T> MultiSelect<'a, T> {
-    pub fn new(message: &'a str, formatter: fn(&T) -> String) -> Self {
-        Self {
-            message,
-            items: Vec::new(),
-            formatter,
-            selected_color: Color::Green,
-            hint: None,
-            group_items: false,
-            page_size: None,
-            initial_selections: Vec::new(),
-            filter_input: true,
-            initial_filter: String::new(),
-        }
-    }
-
-    pub fn with_group_items(mut self, group_items: bool) -> Self {
-        self.group_items = group_items;
-        self
-    }
-
-    pub fn with_selected_color(mut self, selected_color: Color) -> Self {
-        self.selected_color = selected_color;
-        self
-    }
-
-    pub fn with_hint(mut self, hint: &str) -> Self {
-        self.hint = Some(hint.to_string());
-        self
-    }
-
-    pub fn with_page_size(mut self, page_size: usize) -> Self {
-        self.page_size = Some(page_size);
-        self
-    }
-
-    pub fn with_initial_selection(mut self, initial_selection: Vec<usize>) -> Self {
-        self.initial_selections = initial_selection;
-        self
-    }
-
-    pub fn with_filter_input(mut self, filter_input: bool) -> Self {
-        self.filter_input = filter_input;
-        self
-    }
-
-    pub fn with_initial_filter(mut self, initial_filter: &str) -> Self {
-        self.initial_filter = initial_filter.to_string();
-        self
-    }
-
-    pub fn add_items(&mut self, items: Vec<&'a mut T>, group: Option<&str>) {
-        self.items.append(
-            &mut items
-                .into_iter()
-                .map(|item| SelectItem {
-                    data: item,
-                    group: group.map(|g| g.to_string()),
-                })
-                .collect(),
-        );
-    }
-
-    pub fn add_item(&mut self, item: &'a mut T, group: Option<&str>) {
-        self.items.push(SelectItem {
-            data: item,
-            group: group.map(|g| g.to_string()),
-        });
-    }
-
-    fn count_group(&self, items: Vec<&SelectItem<&'a mut T>>) -> usize {
-        if self.group_items {
-            items
-                .iter()
-                .map(|item| &item.group)
-                .collect::<HashSet<_>>()
-                .iter()
-                .count()
-        } else {
-            0
-        }
-    }
-
-    pub fn prompt(self) -> Result<MultiSelectResult<'a, T>, UIError> {
-        let mut stdout = stdout();
-        let mut filter = self.initial_filter.clone();
-        let mut filter_cursor = 0;
-        let mut filter_mode = false;
-        let mut page_index = 0;
-        let mut page_ranges: Vec<Range<usize>> = Vec::new();
-        let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
-
-        let match_filter = |item: &SelectItem<&'a mut T>, filter: &str| -> bool {
-            (self.formatter)(&item.data)
-                .to_lowercase()
-                .contains(&filter.to_lowercase())
-        };
-
-        let mut items: Vec<usize> = self.items.iter().enumerate().map(|(i, _)| i).collect();
-
-        let calculate_page_ranges =
-            |page_size: &Option<usize>, items: &Vec<usize>, page_ranges: &mut Vec<Range<usize>>| {
-                page_ranges.clear();
-                if page_size.is_some() {
-                    let mut group = None;
-                    let mut item_count: usize = 0;
-                    let mut start = 0;
-                    let mut end = 0;
-                    for &i in items.iter() {
-                        if self.group_items && self.items[i].group != group {
-                            group = self.items[i].group.clone();
-                            item_count += 1;
-                        }
-                        if item_count >= self.page_size.unwrap() {
-                            page_ranges.push(start..end);
-                            item_count = 0;
-                            group = None;
-                            start = end
-                        }
-                        item_count += 1;
-                        end += 1;
-                        if item_count >= self.page_size.unwrap() {
-                            page_ranges.push(start..end);
-                            item_count = 0;
-                            group = None;
-                            start = end
-                        }
-                    }
-                    page_ranges.push(start..end);
-                } else {
-                    page_ranges.push(0..items.len());
-                }
-            };
-
-        calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
-
-        let mut max_page_index;
-
-        let hint = match &self.hint {
-            Some(hint) => format!(" [{}]", hint),
-            None => "".to_string(),
-        };
-
-        let prompt = format!("{}{}: ", &self.message, &hint);
-
-        let hint = hint.cyan().italic();
-
-        crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
-
-        let mut selected_index: i64 = 0;
-        let mut selected_indices: HashSet<usize> =
-            self.initial_selections.iter().cloned().collect();
-
-        loop {
-            items = self
-                .items
-                .iter()
-                .enumerate()
-                .filter_map(|(i, item)| {
-                    if match_filter(item, &filter) {
-                        Some(i)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
-
-            max_page_index = page_ranges.len() - 1;
-            page_index = page_index.clamp(0, max_page_index);
-
-            let item_slice = &items[page_ranges[page_index].clone()];
-            let min_height = item_slice.len()
-                + self.count_group(item_slice.iter().map(|&i| &self.items[i]).collect());
-            let height = self
-                .page_size
-                .unwrap_or(&self.items.len() + base_group_count)
-                .min(min_height);
-
-            if items.is_empty() {
-                selected_index = 0;
-            } else if selected_index < 0 {
-                if page_index > 0 {
-                    page_index -= 1;
-                } else {
-                    page_index = max_page_index;
-                }
-                selected_index = (page_ranges[page_index].len() - 1) as i64;
-                continue;
-            } else if selected_index >= item_slice.len() as i64 {
-                if page_index < max_page_index {
-                    page_index += 1;
-                } else {
-                    selected_index = (item_slice.len() - 1) as i64;
-                    continue;
-                }
-                selected_index = 0;
-                continue;
-            }
-
-            let (_, cy) = cursor::position().map_err(|e| UIError::Terminal(e.to_string()))?;
-            let (_, th) = terminal::size().map_err(|e| UIError::Terminal(e.to_string()))?;
-
-            let space_needed = (cy as i32
-                + (self
-                    .page_size
-                    .unwrap_or(self.items.len() + base_group_count)
-                    + 1) as i32
-                - (th as i32 - 1))
-                .max(0) as u16;
-
-            if space_needed > 0 {
-                crossterm::queue!(stdout, ScrollUp(space_needed), MoveUp(space_needed))
-                    .map_err(|e| UIError::Terminal(e.to_string()))?
-            }
-
-            if filter_mode {
-                crossterm::execute!(stdout, cursor::Show)
-                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-            } else {
-                crossterm::execute!(stdout, cursor::Hide)
-                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-            }
-
-            let page = if self.page_size.is_some() {
-                format!("Page {}/{} | ", page_index + 1, max_page_index + 1)
-            } else {
-                String::new()
-            };
-
-            crossterm::queue!(
-                stdout,
-                MoveToColumn(0),
-                Clear(terminal::ClearType::FromCursorDown),
-                Print(&self.message),
-                Print(&hint),
-                Print(": "),
-                Print(if !filter_mode && filter.is_empty() {
-                    "Type to filter".to_string().dim().italic().dark_cyan()
-                } else {
-                    filter.clone().reset()
-                }),
-                MoveToNextLine(
-                    (self
-                        .page_size
-                        .unwrap_or(self.items.len() + base_group_count)
-                        + 1) as u16
-                ),
-                SetForegroundColor(Color::Cyan),
-                if filter_mode {
-                    Print(format!(
-                        "| {}Mode: Typing Filter | [Space] Toggle | [Esc] exit typing",
-                        page
-                    ))
-                } else if !filter.is_empty() {
-                    Print(format!(
-                        "| {}Mode: Filter        | [Space] Toggle | [Esc] clear filter",
-                        page
-                    ))
-                } else {
-                    Print(format!(
-                        "| {}Mode: Normal        | [Space] Toggle | [Esc] cancel",
-                        page
-                    ))
-                },
-                ResetColor,
-                MoveUp(
-                    (self
-                        .page_size
-                        .unwrap_or(self.items.len() + base_group_count)
-                        + 1) as u16
-                ),
-            )
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
-
-            let mut group = None;
-            let mut result = 0;
-
-            for (i, &item_i) in items[page_ranges[page_index].clone()].iter().enumerate() {
-                let item = &self.items[item_i];
-                result += 1;
-                if self.group_items {
-                    match &item.group {
-                        Some(item_group) => {
-                            if Some(item_group) != group {
-                                group = Some(item_group);
-                                crossterm::queue!(
-                                    stdout,
-                                    MoveToNextLine(1),
-                                    Print(format!(
-                                        " {}",
-                                        item_group.clone().cyan().italic().bold()
-                                    )),
-                                )
-                                .map_err(|e| UIError::Other(e.to_string()))?
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let selected = i == selected_index as usize;
-                let item_string = (self.formatter)(&item.data);
-                let toggled = selected_indices.contains(&item_i);
-                let toggled_str = if toggled { "✔" } else { " " };
-                let color = if selected {
-                    Color::Yellow
-                } else if toggled {
-                    self.selected_color
-                } else {
-                    Color::Reset
-                };
-                let attributes = if selected {
-                    Attributes::default().with(Attribute::Bold)
-                } else {
-                    Attributes::none()
-                };
-                crossterm::queue!(
-                    stdout,
-                    MoveToNextLine(1),
-                    SetAttributes(attributes),
-                    SetForegroundColor(color),
-                    Print(if selected {
-                        format!("  > [{}] ", toggled_str)
-                    } else {
-                        format!("    [{}] ", toggled_str)
-                    }),
-                    Print(format!("{}", item_string)),
-                    SetAttribute(Attribute::Reset),
-                    ResetColor,
-                )
-                .map_err(|e| UIError::Other(e.to_string()))?;
-            }
-
-            crossterm::queue!(
-                stdout,
-                MoveUp(height as u16),
-                MoveToColumn((prompt.len() + filter_cursor) as u16)
-            )
-            .map_err(|e| UIError::Other(e.to_string()))?;
-
-            if items.is_empty() {
-                crossterm::queue!(stdout, MoveDown(height as u16),)
-                    .map_err(|e| UIError::Other(e.to_string()))?;
-            }
-
-            stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
-
-            if let Event::Key(key_event) =
-                event::read().map_err(|e| UIError::Terminal(e.to_string()))?
-            {
-                if !key_event.is_press() {
-                    continue;
-                }
-                match key_event.code {
-                    KeyCode::Up | KeyCode::BackTab => selected_index -= 1,
-                    KeyCode::Down | KeyCode::Tab => {
-                        selected_index += 1;
-                        if selected_index >= (item_slice.len()) as i64
-                            && page_index == max_page_index
-                        {
-                            page_index = 0;
-                            selected_index = 0;
-                        }
-                    }
-                    KeyCode::Enter => {
-                        if result == 0 {
-                            continue;
-                        }
-                        break;
-                    }
-                    KeyCode::Esc => {
-                        if filter_mode {
-                            filter_mode = false;
-                            continue;
-                        } else if !filter.is_empty() {
-                            filter.clear();
-                            filter_cursor = 0;
-                            continue;
-                        }
-                        render_prompt(
-                            &mut stdout,
-                            &self.message,
-                            &self.hint,
-                            "<canceled>",
-                            Color::Red,
-                            None,
-                            false,
-                        )?;
-                        cleanup_terminal(&mut stdout, true)?;
-                    }
-                    KeyCode::Char(c) => {
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            if c == 'h' && self.filter_input {
-                                let end = filter_cursor;
-                                let mut in_word = true;
-                                for (i, c) in filter.chars().rev().enumerate() {
-                                    if filter.len() - i < filter_cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                filter_cursor = filter.len() - i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    filter_cursor = 0;
-                                }
-                                filter.replace_range(filter_cursor..end, "");
-                                continue;
-                            } else if c == 'c' {
-                                render_prompt(
-                                    &mut stdout,
-                                    &self.message,
-                                    &self.hint,
-                                    "<interupted>",
-                                    Color::Red,
-                                    None,
-                                    false,
-                                )?;
-                                cleanup_terminal(&mut stdout, true)?;
-                            }
-                        }
-                        if !self.filter_input {
-                            continue;
-                        }
-                        if c == ' ' && !filter_mode {
-                            let to_toggle =
-                                items[page_ranges[page_index].clone()][selected_index as usize];
-                            if selected_indices.contains(&to_toggle) {
-                                selected_indices.remove(&to_toggle);
-                            } else {
-                                selected_indices.insert(to_toggle);
-                            }
-                            continue;
-                        }
-                        filter_mode = true;
-                        filter.insert(filter_cursor, c);
-                        filter_cursor += 1;
-                    }
-                    KeyCode::Backspace => {
-                        if !self.filter_input {
-                            continue;
-                        }
-                        filter_mode = true;
-                        if filter_cursor > 0 {
-                            filter.remove(filter_cursor - 1);
-                            filter_cursor = (filter_cursor as i32 - 1).max(0) as usize;
-                        }
-                    }
-                    KeyCode::Delete => {
-                        if !self.filter_input {
-                            continue;
-                        }
-                        filter_mode = true;
-                        if filter_cursor < filter.len() {
-                            if key_event.modifiers == KeyModifiers::CONTROL {
-                                let start = filter_cursor;
-                                let mut in_word = true;
-                                for (i, c) in filter.chars().enumerate() {
-                                    if i > filter_cursor {
-                                        if !c.is_whitespace() {
-                                            if in_word {
-                                                continue;
-                                            } else {
-                                                filter_cursor = i;
-                                                break;
-                                            }
-                                        } else {
-                                            in_word = false
-                                        }
-                                    }
-                                }
-                                if in_word {
-                                    filter_cursor = filter.len();
-                                }
-                                filter.replace_range(start..filter_cursor, "");
-                                filter_cursor = start;
-                                continue;
-                            }
-                            filter.remove(filter_cursor);
-                        }
-                    }
-                    KeyCode::Left => {
-                        if !filter_mode || filter.is_empty() {
-                            if page_index as i64 - 1 < 0 {
-                                page_index = max_page_index;
-                                continue;
-                            }
-                            page_index = (page_index as i64 - 1) as usize;
-                            continue;
-                        }
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in filter.chars().rev().enumerate() {
-                                if filter.len() - i <= filter_cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            filter_cursor = filter.len() - i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                filter_cursor = 0;
-                            }
-                            continue;
-                        }
-                        filter_cursor = (filter_cursor as i32 - 1).max(0) as usize;
-                    }
-                    KeyCode::Right => {
-                        if !filter_mode || filter.is_empty() {
-                            page_index = (page_index + 1) as usize;
-                            if page_index > max_page_index {
-                                page_index = 0;
-                            }
-                            continue;
-                        }
-                        if key_event.modifiers == KeyModifiers::CONTROL {
-                            let mut in_word = true;
-                            for (i, c) in filter.chars().enumerate() {
-                                if i >= filter_cursor {
-                                    if !c.is_whitespace() {
-                                        if in_word {
-                                            continue;
-                                        } else {
-                                            filter_cursor = i;
-                                            break;
-                                        }
-                                    } else {
-                                        in_word = false
-                                    }
-                                }
-                            }
-                            if in_word {
-                                filter_cursor = filter.len();
-                            }
-                            continue;
-                        }
-                        filter_cursor =
-                            (filter_cursor as i32 + 1).min(filter.len() as i32) as usize;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
         let list_size = self.items.len();
         let (selected_items, unselected_items): (Vec<(usize, &'a mut T)>, Vec<(usize, &'a mut T)>) =
             self.items
@@ -1765,7 +1381,11 @@ impl<'a, T> MultiSelect<'a, T> {
             &mut stdout,
             &self.message,
             &self.hint,
-            &format!("Selected {} out of {}", selected_items.len(), list_size),
+            &(if self.multi_selection {
+                format!("Selected {} out of {}", selected_items.len(), list_size)
+            } else {
+                (self.formatter)(selected_items[0].1)
+            }),
             Color::Green,
             Some(
                 Attributes::default()
@@ -1777,7 +1397,7 @@ impl<'a, T> MultiSelect<'a, T> {
 
         cleanup_terminal(&mut stdout, false)?;
 
-        let result = MultiSelectResult {
+        let result = SelectResult {
             selected: selected_items,
             unselected: unselected_items,
         };
@@ -1854,34 +1474,37 @@ mod test {
         let mut select = Select::<String>::new("Select something please", |i| i.clone())
             .with_hint("Game please")
             .with_page_size(6)
+            .with_disabled_items(vec![0, get_test_vec().len() - 1])
             .with_group_items(true);
         let mut first = get_test_vec();
         let mut second = first.split_off(7);
 
         // select.add_items(first.iter_mut().collect(), None);
-        select.add_items(first.iter_mut().collect(), Some("Separator desu:"));
-        select.add_items(second.iter_mut().collect(), Some("Separator 2 desu:"));
+        select.add_items(first.as_mut_slice(), Some("Separator desu:"));
+        select.add_items(second.as_mut_slice(), Some("Separator 2 desu:"));
 
         let selection = select.prompt();
 
         match selection {
-            Ok((_, str)) => println!("You selected: {}", str),
+            Ok(result) => println!("You selected: {}", result.data()),
             Err(err) => println!("{:?}", err),
         }
     }
 
     fn test_multi_select() {
-        let mut select = MultiSelect::<String>::new("Select a few things please", |i| i.clone())
+        let mut select = Select::<String>::new("Select a few things please", |i| i.clone())
+            .with_multi_selection(true)
             .with_hint("Game please")
+            .with_disabled_items(vec![0, get_test_vec().len() - 1])
             .with_page_size(6)
             .with_group_items(true);
         let mut first = get_test_vec();
         let mut second = first.split_off(7);
 
-        select.add_items(first.iter_mut().collect(), Some("Separator desu:"));
-        select.add_items(second.iter_mut().collect(), Some("Separator 2 desu:"));
+        select.add_items(first.as_mut_slice(), Some("Separator desu:"));
+        select.add_items(second.as_mut_slice(), Some("Separator 2 desu:"));
 
-        let selections = select.with_initial_selection(vec![3, 4, 5, 6]).prompt();
+        let selections = select.with_initial_selection(vec![0, 3, 4, 5, 6]).prompt();
 
         match selections {
             Ok(strs) => {

@@ -4,9 +4,10 @@ mod ui;
 use crossterm::style::{Color, Stylize};
 use serde::{Deserialize, Serialize};
 
-use crate::ui::{Confirm, MultiSelect, Select, Text};
+use crate::ui::{Confirm, Select, Text};
 
 const FILE: &'static str = "todo.json";
+const PAGE_SIZE: usize = 20;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TodoList {
@@ -80,8 +81,7 @@ impl TodoList {
             }
             for item in chunk {
                 let status = if item.done { "[✔]" } else { "[ ]" };
-                if to_remove.contains(&i)
-                {
+                if to_remove.contains(&i) {
                     println!(
                         "   {}",
                         format!("{} {}", status, item.description.to_owned())
@@ -244,6 +244,7 @@ fn get_command(args: Vec<String>) -> Command {
 }
 
 fn main() {
+
     let todo_list = match find_todo_list() {
         Ok(todo_list) => Ok(todo_list),
         Err(err) => {
@@ -344,10 +345,10 @@ fn main() {
                     }
                 });
                 let mut tags = todo_list.get_tags();
-                tag_select.add_items(tags.iter_mut().collect(), None);
+                tag_select.add_items(tags.as_mut_slice(), None);
                 match tag_select.prompt() {
-                    Ok((i, tag)) => {
-                        todo_list.items.retain(|i| i.tag == *tag);
+                    Ok(result) => {
+                        todo_list.items.retain(|i| i.tag == *result.selected[0].1);
                         todo_list.print();
                     }
                     Err(ui::UIError::Canceled) => {}
@@ -365,11 +366,12 @@ fn main() {
         Command::Complete => {
             if let Ok(mut todo_list) = todo_list {
                 let mut done_multi_selection =
-                    MultiSelect::<TodoItem>::new("Toggle tasks completion status", |i| {
+                    Select::<TodoItem>::new("Toggle tasks completion status", |i| {
                         i.description.clone()
                     })
+                    .with_multi_selection(true)
                     .with_group_items(true)
-                    .with_page_size(10)
+                    .with_page_size(PAGE_SIZE)
                     .with_initial_selection(
                         todo_list
                             .items
@@ -380,8 +382,8 @@ fn main() {
                     );
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
-                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
-                    done_multi_selection.add_items(chunk.iter_mut().collect(), Some(&group));
+                    let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
+                    done_multi_selection.add_items(chunk, Some(&group));
                 }
                 match done_multi_selection.prompt() {
                     Ok(result) => {
@@ -401,74 +403,94 @@ fn main() {
                         }
                         todo_list.print();
                     }
-                    Err(_) => {}
+                    Err(ui::UIError::Canceled) => {
+                        eprintln!("No completion status of tasks has been changed!");
+                        process::exit(0)
+                    }
+                    Err(ui::UIError::Terminal(err)) => {
+                        eprintln!("Terminal error: {err}");
+                        process::exit(1)
+                    }
+                    Err(ui::UIError::Other(err)) => {
+                        eprintln!("Error: {err}");
+                        process::exit(1)
+                    }
                 }
             }
         }
         Command::Edit => {
             if let Ok(mut todo_list) = todo_list {
                 let mut edit_select =
-                    Select::<TodoItem>::new("Select a task to edit", |i| i.description.clone())
+                    Select::<TodoItem>::new("Select a task or multiple tasks to edit", |i| {
+                        let status = if i.done { "(✓)" } else { "( )" };
+                        format!("{} {}", status, i.description)
+                    })
+                        // .with_multi_selection(true)
                         .with_group_items(true)
-                        .with_page_size(10);
+                        .with_page_size(PAGE_SIZE);
                 let tags = todo_list.get_tags();
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
-                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
-                    edit_select.add_items(chunk.iter_mut().collect(), Some(&group));
+                    let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
+                    edit_select.add_items(chunk, Some(&group));
                 }
                 match edit_select.prompt() {
-                    Ok((_, selected)) => {
+                    Ok(mut result) => {
+                        let selected = result.data_mut();
                         let mut field_select =
                             Select::<String>::new("Select a field to edit", |i| i.clone());
                         let mut options = vec!["Description".to_owned(), "Tag".to_owned()];
-                        field_select.add_items(options.iter_mut().collect(), None);
+                        field_select.add_items(options.as_mut_slice(), None);
                         match field_select.prompt() {
-                            Ok((0, _)) => {
-                                match Text::new("Enter new task description")
-                                    .with_default(&selected.description)
-                                    .with_initial_value(&selected.description)
-                                    .prompt()
-                                {
-                                    Ok(new_description) => selected.description = new_description,
-                                    Err(ui::UIError::Canceled) => {
-                                        eprintln!("No tasks has been edited!");
-                                        process::exit(0)
-                                    }
-                                    Err(ui::UIError::Terminal(err)) => {
-                                        eprintln!("Terminal error: {err}");
-                                        process::exit(1)
-                                    }
-                                    Err(ui::UIError::Other(err)) => {
-                                        eprintln!("Error: {err}");
-                                        process::exit(1)
-                                    }
-                                }
-                            }
-                            Ok((1, _)) => {
-                                match Text::new("Enter new task description")
-                                    .with_default(&selected.tag)
-                                    .with_initial_value(&selected.tag)
-                                    .with_auto_completion(tags)
-                                    .with_suggest_on_empty(true)
-                                    .prompt()
-                                {
-                                    Ok(new_tag) => selected.tag = new_tag,
-                                    Err(ui::UIError::Canceled) => {
-                                        eprintln!("No tasks has been edited!");
-                                        process::exit(0)
-                                    }
-                                    Err(ui::UIError::Terminal(err)) => {
-                                        eprintln!("Terminal error: {err}");
-                                        process::exit(1)
-                                    }
-                                    Err(ui::UIError::Other(err)) => {
-                                        eprintln!("Error: {err}");
-                                        process::exit(1)
+                            Ok(result) => match result.index() {
+                                0 => {
+                                    match Text::new("Enter new task description")
+                                        .with_default(&selected.description)
+                                        .with_initial_value(&selected.description)
+                                        .prompt()
+                                    {
+                                        Ok(new_description) => {
+                                            selected.description = new_description
+                                        }
+                                        Err(ui::UIError::Canceled) => {
+                                            eprintln!("No tasks has been edited!");
+                                            process::exit(0)
+                                        }
+                                        Err(ui::UIError::Terminal(err)) => {
+                                            eprintln!("Terminal error: {err}");
+                                            process::exit(1)
+                                        }
+                                        Err(ui::UIError::Other(err)) => {
+                                            eprintln!("Error: {err}");
+                                            process::exit(1)
+                                        }
                                     }
                                 }
-                            }
-                            Ok(_) => {}
+                                1 => {
+                                    match Text::new("Enter new task description")
+                                        .with_default(&selected.tag)
+                                        .with_initial_value(&selected.tag)
+                                        .with_auto_completion(tags)
+                                        .with_suggest_on_empty(true)
+                                        .prompt()
+                                    {
+                                        Ok(new_tag) => selected.tag = new_tag,
+                                        Err(ui::UIError::Canceled) => {
+                                            eprintln!("No tasks has been edited!");
+                                            process::exit(0)
+                                        }
+                                        Err(ui::UIError::Terminal(err)) => {
+                                            eprintln!("Terminal error: {err}");
+                                            process::exit(1)
+                                        }
+                                        Err(ui::UIError::Other(err)) => {
+                                            eprintln!("Error: {err}");
+                                            process::exit(1)
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            },
                             Err(ui::UIError::Canceled) => {
                                 eprintln!("No tasks has been edited!");
                                 process::exit(0)
@@ -512,17 +534,18 @@ fn main() {
         Command::Remove => {
             if let Ok(mut todo_list) = todo_list {
                 let mut remove_multi_selection =
-                    MultiSelect::<TodoItem>::new("Select tasks for removal", |i| {
-                        let status = if i.done {"(✓)"} else {"( )"};
+                    Select::<TodoItem>::new("Select tasks for removal", |i| {
+                        let status = if i.done { "(✓)" } else { "( )" };
                         format!("{} {}", status, i.description)
                     })
+                    .with_multi_selection(true)
                     .with_group_items(true)
-                    .with_page_size(10)
+                    .with_page_size(PAGE_SIZE)
                     .with_selected_color(Color::Red);
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
-                    let group = format!("{}:", if tag.is_empty() {"__untagged__"} else {tag});
-                    remove_multi_selection.add_items(chunk.iter_mut().collect(), Some(&group));
+                    let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
+                    remove_multi_selection.add_items(chunk, Some(&group));
                 }
                 let mut to_remove: Vec<usize>;
                 match remove_multi_selection.prompt() {
