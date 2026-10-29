@@ -1,12 +1,10 @@
 use std::{
     collections::HashSet,
-    i128::MAX,
     io::{Stdout, Write, stdout},
     ops::Range,
 };
 
 use crossterm::{
-    Command,
     cursor::{self, MoveDown, MoveLeft, MoveRight, MoveToColumn, MoveToNextLine, MoveUp},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style::{
@@ -16,14 +14,6 @@ use crossterm::{
     },
     terminal::{self, Clear, ScrollUp},
 };
-
-struct NoOp;
-
-impl Command for NoOp {
-    fn write_ansi(&self, _: &mut impl std::fmt::Write) -> std::fmt::Result {
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 pub enum UIError {
@@ -729,6 +719,7 @@ pub struct Select<'a, T> {
     filter_input: bool,
     initial_filter: String,
     multi_selection: bool,
+    select_on_enter: bool,
 }
 
 pub struct SelectResult<'a, T> {
@@ -736,7 +727,13 @@ pub struct SelectResult<'a, T> {
     pub unselected: Vec<(usize, &'a mut T)>,
 }
 
-impl<'a, T> SelectResult<'a, T> {
+impl<'a, T: Clone> SelectResult<'a, T> {
+    pub fn nth_data(&'a self, index: usize) -> &'a T {
+        self.selected[index].1
+    }
+    pub fn nth_data_mut(&'a mut self, index: usize) -> &'a mut T {
+        self.selected[index].1
+    }
     pub fn data(&'a self) -> &'a T {
         self.selected[0].1
     }
@@ -763,7 +760,13 @@ impl<'a, T> Select<'a, T> {
             filter_input: true,
             initial_filter: String::new(),
             multi_selection: false,
+            select_on_enter: false
         }
+    }
+
+    pub fn with_select_on_enter(mut self, select_on_enter: bool) -> Self {
+        self.select_on_enter = select_on_enter;
+        self
     }
 
     pub fn with_multi_selection(mut self, multi_selection: bool) -> Self {
@@ -1245,7 +1248,7 @@ impl<'a, T> Select<'a, T> {
                         {
                             continue;
                         }
-                        if !self.multi_selection {
+                        if !self.multi_selection || (self.select_on_enter && selected_indices.is_empty()) {
                             selected_indices.clear();
                             selected_indices.insert(
                                 items[page_ranges[page_index].clone()][selected_index as usize],
