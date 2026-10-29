@@ -1,7 +1,5 @@
 use std::{
-    collections::HashSet,
-    io::{Stdout, Write, stdout},
-    ops::Range,
+    collections::HashSet, error::Error, fmt::{Display}, io::{Stdout, Write, stdout}, ops::Range,
 };
 
 use crossterm::{
@@ -21,6 +19,18 @@ pub enum UIError {
     Terminal(String),
     Other(String),
 }
+
+impl Display for UIError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UIError::Canceled => write!(f, "Operation Canceled"),
+            UIError::Terminal(e) => write!(f, "Terminal: {e}"),
+            UIError::Other(e) => write!(f, "Other: {e}"),
+        }
+    }
+}
+
+impl Error for UIError {}
 
 pub struct Confirm<'a> {
     message: &'a str,
@@ -719,6 +729,7 @@ pub struct Select<'a, T> {
     filter_input: bool,
     initial_filter: String,
     multi_selection: bool,
+    hybrid: bool,
     select_on_enter: bool,
 }
 
@@ -760,7 +771,8 @@ impl<'a, T> Select<'a, T> {
             filter_input: true,
             initial_filter: String::new(),
             multi_selection: false,
-            select_on_enter: false
+            hybrid: false,
+            select_on_enter: false,
         }
     }
 
@@ -771,6 +783,11 @@ impl<'a, T> Select<'a, T> {
 
     pub fn with_multi_selection(mut self, multi_selection: bool) -> Self {
         self.multi_selection = multi_selection;
+        self
+    }
+
+    pub fn with_hybrid(mut self, hybrid: bool) -> Self {
+        self.hybrid = hybrid;
         self
     }
 
@@ -1153,7 +1170,7 @@ impl<'a, T> Select<'a, T> {
                 let disabled = self.disabled_items.contains(&item_i);
                 let item_string_formatted = format!(
                     "{}{}",
-                    if self.multi_selection {
+                    if self.multi_selection && (!self.hybrid || (self.hybrid && selected_indices.len() > 0)) {
                         format!("[{}] ", toggled_str)
                     } else {
                         String::new()
@@ -1161,7 +1178,11 @@ impl<'a, T> Select<'a, T> {
                     item_string
                 );
                 let item_string_formatted = if disabled {
-                    item_string_formatted.reset().dim().crossed_out().to_string()
+                    item_string_formatted
+                        .reset()
+                        .dim()
+                        .crossed_out()
+                        .to_string()
                 } else {
                     item_string_formatted
                 };
@@ -1248,7 +1269,9 @@ impl<'a, T> Select<'a, T> {
                         {
                             continue;
                         }
-                        if !self.multi_selection || (self.select_on_enter && selected_indices.is_empty()) {
+                        if !self.multi_selection
+                            || (self.select_on_enter && selected_indices.is_empty()) || self.hybrid
+                        {
                             selected_indices.clear();
                             selected_indices.insert(
                                 items[page_ranges[page_index].clone()][selected_index as usize],
@@ -1283,7 +1306,10 @@ impl<'a, T> Select<'a, T> {
                     }
                     KeyCode::Char(c) => {
                         if key_event.modifiers == KeyModifiers::CONTROL {
-                            if c == 'h' && self.filter_input {
+                            if !self.filter_input {
+                                continue;
+                            }
+                            if c == 'h' {
                                 Text::delete_word_back(&mut filter_cursor, &mut filter);
                                 continue;
                             } else if c == 'c' {
@@ -1309,9 +1335,6 @@ impl<'a, T> Select<'a, T> {
                                 continue;
                             }
                         }
-                        if !self.filter_input {
-                            continue;
-                        }
                         if c == ' ' && !filter_mode && !items.is_empty() {
                             if !self.multi_selection {
                                 continue;
@@ -1329,18 +1352,36 @@ impl<'a, T> Select<'a, T> {
                             }
                             continue;
                         }
-                        filter_mode = true;
+                        if !filter_mode {
+                            if c == 'k' {
+                                selected_index += 1;
+                                direction = 1;
+                            } else if c == 'K' {
+                                selected_index += 3;
+                                direction = 1;
+                            } else if c == 'i' {
+                                selected_index -= 1;
+                                direction = -1;
+                            } else if c == 'I' {
+                                selected_index -= 3;
+                                direction = 1;
+                            }
+                            if c == '/' && self.filter_input {
+                                filter_mode = true;
+                            }
+                            continue;
+                        } else {
+                        }
                         Text::type_char(&mut filter_cursor, &mut filter, c);
                     }
                     KeyCode::Backspace => {
-                        if !self.filter_input {
+                        if !filter_mode {
                             continue;
                         }
-                        filter_mode = true;
                         Text::delete_char_back(&mut filter_cursor, &mut filter);
                     }
                     KeyCode::Delete => {
-                        if !self.filter_input {
+                        if !filter_mode {
                             continue;
                         }
                         filter_mode = true;

@@ -1,13 +1,15 @@
 use std::{collections::HashSet, env, fs, process};
 
 mod ui;
-use crossterm::style::{Color, Stylize};
+use crossterm::style::{Attribute, Color, Stylize};
 use serde::{Deserialize, Serialize};
 
-use crate::ui::{Confirm, Select, Text};
+use crate::ui::{Confirm, Select, Text, UIError};
 
 const FILE: &'static str = "todo.json";
 const PAGE_SIZE: usize = 20;
+const DONE_PREFIX: &'static str = "Done  ";
+const PENDING_PREFIX: &'static str = " --   ";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TodoList {
@@ -130,8 +132,7 @@ impl TodoList {
             }
             for item in chunk {
                 let status = if item.done { "[✔]" } else { "[ ]" };
-                if to_highlight.contains(item)
-                {
+                if to_highlight.contains(item) {
                     println!(
                         "{}",
                         format!("   {} {}", status, item.description.to_owned())
@@ -241,25 +242,34 @@ fn get_command(args: Vec<String>) -> Command {
     Command::Unknown
 }
 
-fn main() {
-    let todo_list = match find_todo_list() {
-        Ok(todo_list) => Ok(todo_list),
-        Err(err) => {
-            match &err {
-                TodoFindError::NotFound => {
-                    eprintln!("No 'todo.json' found!");
-                }
-                TodoFindError::Invalid => {
-                    eprintln!("'todo.json' found, but it is invalid or corrupted");
-                }
-                TodoFindError::Other(e) => {
-                    eprintln!("Failed to find 'todo.json': {}", e);
-                }
-            }
-            Err(err)
+fn handle_ui_error(err: ui::UIError, cancel_message: &str) {
+    match err {
+        ui::UIError::Canceled => {
+            eprintln!("{}", cancel_message);
+            process::exit(0)
         }
-    };
+        ui::UIError::Terminal(err) => {
+            eprintln!("Terminal error: {err}");
+            process::exit(1)
+        }
+        ui::UIError::Other(err) => {
+            eprintln!("Error: {err}");
+            process::exit(1)
+        }
+    }
+}
 
+fn handle_save_error(err: TodoListError) {
+    match err {
+        TodoListError::SaveError(e) => {
+            eprintln!("Problem with saving to 'todo.json'! {e}");
+            eprintln!("No change has been made!");
+            process::exit(1)
+        }
+    }
+}
+
+fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
     match get_command(env::args().collect()) {
         Command::List => {
             if let Ok(todo_list) = todo_list {
@@ -286,18 +296,11 @@ fn main() {
                         Ok(true) => {
                             new_todo_list = TodoList::new();
                         }
-                        Err(ui::UIError::Canceled) | Ok(false) => {
+                        Ok(false) => {
                             eprintln!("No 'todo.json' has been created!");
-                            process::exit(0)
+
                         }
-                        Err(ui::UIError::Terminal(err)) => {
-                            eprintln!("Terminal error: {err}");
-                            process::exit(1)
-                        }
-                        Err(ui::UIError::Other(err)) => {
-                            eprintln!("Error: {err}");
-                            process::exit(1)
-                        }
+                        Err(err) => handle_ui_error(err, "No 'todo.json' has been created!"),
                     }
                 }
             }
@@ -308,18 +311,7 @@ fn main() {
                 .prompt()
             {
                 Ok(tag) => new_item.tag = tag,
-                Err(ui::UIError::Canceled) => {
-                    eprintln!("No tasks has been added!");
-                    process::exit(0)
-                }
-                Err(ui::UIError::Terminal(err)) => {
-                    eprintln!("Terminal error: {err}");
-                    process::exit(1)
-                }
-                Err(ui::UIError::Other(err)) => {
-                    eprintln!("Error: {err}");
-                    process::exit(1)
-                }
+                Err(err) => handle_ui_error(err, "No tasks has been added!"),
             }
             new_todo_list.push(new_item.clone());
             match new_todo_list.save() {
@@ -348,15 +340,7 @@ fn main() {
                         todo_list.items.retain(|i| i.tag == *result.selected[0].1);
                         todo_list.print();
                     }
-                    Err(ui::UIError::Canceled) => {}
-                    Err(ui::UIError::Terminal(err)) => {
-                        eprintln!("Terminal error: {err}");
-                        process::exit(1)
-                    }
-                    Err(ui::UIError::Other(err)) => {
-                        eprintln!("Error: {err}");
-                        process::exit(1)
-                    }
+                    Err(err) => handle_ui_error(err, ""),
                 }
             }
         }
@@ -400,17 +384,8 @@ fn main() {
                         }
                         todo_list.print();
                     }
-                    Err(ui::UIError::Canceled) => {
-                        eprintln!("No completion status of tasks has been changed!");
-                        process::exit(0)
-                    }
-                    Err(ui::UIError::Terminal(err)) => {
-                        eprintln!("Terminal error: {err}");
-                        process::exit(1)
-                    }
-                    Err(ui::UIError::Other(err)) => {
-                        eprintln!("Error: {err}");
-                        process::exit(1)
+                    Err(err) => {
+                        handle_ui_error(err, "No completion status of tasks has been changed!")
                     }
                 }
             }
@@ -419,11 +394,17 @@ fn main() {
             if let Ok(mut todo_list) = todo_list {
                 let mut edit_select =
                     Select::<TodoItem>::new("Select a task or multiple tasks to edit", |i| {
-                        let status = if i.done { "(✓)" } else { "( )" };
-                        format!("{} {}", status, i.description)
+                        let status = if i.done { DONE_PREFIX } else { PENDING_PREFIX };
+                        format!(
+                            "{}{}{} {}",
+                            Attribute::Bold,
+                            status,
+                            Attribute::NoBold,
+                            i.description
+                        )
                     })
                     .with_multi_selection(true)
-                    .with_select_on_enter(true)
+                    .with_hybrid(true)
                     .with_group_items(true)
                     .with_page_size(PAGE_SIZE);
                 let tags = todo_list.get_tags();
@@ -454,17 +435,8 @@ fn main() {
                                             selected.description = new_description;
                                             edited_item.push(selected.clone());
                                         }
-                                        Err(ui::UIError::Canceled) => {
-                                            eprintln!("No tasks has been edited!");
-                                            process::exit(0)
-                                        }
-                                        Err(ui::UIError::Terminal(err)) => {
-                                            eprintln!("Terminal error: {err}");
-                                            process::exit(1)
-                                        }
-                                        Err(ui::UIError::Other(err)) => {
-                                            eprintln!("Error: {err}");
-                                            process::exit(1)
+                                        Err(err) => {
+                                            handle_ui_error(err, "No tasks has been edited!")
                                         }
                                     }
                                 }
@@ -480,18 +452,9 @@ fn main() {
                                                     item.tag = new_tag.clone();
                                                     edited_item.push(item.clone());
                                                 }
-                                            },
-                                            Err(ui::UIError::Canceled) => {
-                                                eprintln!("No tasks has been edited!");
-                                                process::exit(0)
                                             }
-                                            Err(ui::UIError::Terminal(err)) => {
-                                                eprintln!("Terminal error: {err}");
-                                                process::exit(1)
-                                            }
-                                            Err(ui::UIError::Other(err)) => {
-                                                eprintln!("Error: {err}");
-                                                process::exit(1)
+                                            Err(err) => {
+                                                handle_ui_error(err, "No tasks has been edited!")
                                             }
                                         }
                                     } else {
@@ -506,18 +469,13 @@ fn main() {
                                             Ok(new_tag) => {
                                                 selected.tag = new_tag;
                                                 edited_item.push(selected.clone());
-                                            },
+                                            }
                                             Err(ui::UIError::Canceled) => {
                                                 eprintln!("No tasks has been edited!");
                                                 process::exit(0)
                                             }
-                                            Err(ui::UIError::Terminal(err)) => {
-                                                eprintln!("Terminal error: {err}");
-                                                process::exit(1)
-                                            }
-                                            Err(ui::UIError::Other(err)) => {
-                                                eprintln!("Error: {err}");
-                                                process::exit(1)
+                                            Err(err) => {
+                                                handle_ui_error(err, "No tasks has been edited!")
                                             }
                                         }
                                     }
@@ -528,14 +486,7 @@ fn main() {
                                 eprintln!("No tasks has been edited!");
                                 process::exit(0)
                             }
-                            Err(ui::UIError::Terminal(err)) => {
-                                eprintln!("Terminal error: {err}");
-                                process::exit(1)
-                            }
-                            Err(ui::UIError::Other(err)) => {
-                                eprintln!("Error: {err}");
-                                process::exit(1)
-                            }
+                            Err(err) => handle_ui_error(err, "No tasks has been edited!"),
                         }
                         todo_list.sort();
                         match todo_list.save() {
@@ -552,14 +503,7 @@ fn main() {
                         eprintln!("No tasks has been edited!");
                         process::exit(0)
                     }
-                    Err(ui::UIError::Terminal(err)) => {
-                        eprintln!("Terminal error: {err}");
-                        process::exit(1)
-                    }
-                    Err(ui::UIError::Other(err)) => {
-                        eprintln!("Error: {err}");
-                        process::exit(1)
-                    }
+                    Err(err) => handle_ui_error(err, "No tasks has been edited!"),
                 }
             }
         }
@@ -567,8 +511,14 @@ fn main() {
             if let Ok(mut todo_list) = todo_list {
                 let mut remove_multi_selection =
                     Select::<TodoItem>::new("Select tasks for removal", |i| {
-                        let status = if i.done { "(✓)" } else { "( )" };
-                        format!("{} {}", status, i.description)
+                        let status = if i.done { DONE_PREFIX } else { PENDING_PREFIX };
+                        format!(
+                            "{}{}{} {}",
+                            Attribute::Bold,
+                            status,
+                            Attribute::Reset,
+                            i.description
+                        )
                     })
                     .with_multi_selection(true)
                     .with_group_items(true)
@@ -588,14 +538,7 @@ fn main() {
                         eprintln!("No tasks has been removed!");
                         process::exit(0)
                     }
-                    Err(ui::UIError::Terminal(err)) => {
-                        eprintln!("Terminal error: {err}");
-                        process::exit(1)
-                    }
-                    Err(ui::UIError::Other(err)) => {
-                        eprintln!("Error: {err}");
-                        process::exit(1)
-                    }
+                    Err(err) => handle_ui_error(err, "No tasks has been removed!"),
                 }
                 todo_list.print_remove(&to_remove);
                 todo_list.remove(&mut to_remove);
@@ -610,5 +553,41 @@ fn main() {
             }
         }
         _ => {}
+    }
+}
+
+fn main() {
+    let todo_list = match find_todo_list() {
+        Ok(todo_list) => Ok(todo_list),
+        Err(err) => {
+            match &err {
+                TodoFindError::NotFound => {
+                    eprintln!("No 'todo.json' found!");
+                }
+                TodoFindError::Invalid => {
+                    eprintln!("'todo.json' found, but it is invalid or corrupted");
+                }
+                TodoFindError::Other(e) => {
+                    eprintln!("Failed to find 'todo.json': {}", e);
+                }
+            }
+            Err(err)
+        }
+    };
+
+    match run(env::args().collect(), todo_list) {
+        Ok(()) => {}
+        Err(ui::UIError::Canceled) => {
+            eprintln!("A certain operation has been canceled without being handled!");
+            process::exit(1)
+        }
+        Err(ui::UIError::Terminal(err)) => {
+            eprintln!("Terminal error: {err}");
+            process::exit(1)
+        }
+        Err(ui::UIError::Other(err)) => {
+            eprintln!("Error: {err}");
+            process::exit(1)
+        }
     }
 }
