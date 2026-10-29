@@ -1,5 +1,9 @@
 use std::{
-    collections::HashSet, error::Error, fmt::{Display}, io::{Stdout, Write, stdout}, ops::Range,
+    collections::HashSet,
+    error::Error,
+    fmt::Display,
+    io::{Stdout, Write, stdout},
+    ops::Range,
 };
 
 use crossterm::{
@@ -47,10 +51,10 @@ fn render_prompt(
     new_line: bool,
 ) -> Result<usize, UIError> {
     let hint = match hint.as_ref() {
-        Some(hint) if !hint.is_empty() => format!("[{}]", hint).cyan().to_string(),
+        Some(hint) if !hint.is_empty() => format!(" [{}]", hint).cyan().to_string(),
         _ => String::new(),
     };
-    let prompt = format!("{} {} {}: ", "?".to_string().green(), &message, &hint);
+    let prompt = format!("{} {}{}: ", "?".to_string().green(), &message, &hint);
     crossterm::execute!(
         stdout,
         MoveToColumn(0),
@@ -660,10 +664,24 @@ impl<'a> Text<'a> {
                         break;
                     }
                     KeyCode::Left => {
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         Text::move_left(&mut cursor, &mut text, &key_event);
                         continue;
                     }
                     KeyCode::Right => {
+                        apply_suggestion(
+                            &mut is_selecting_suggestion,
+                            &mut selected_suggestion,
+                            &matches,
+                            &mut text,
+                            &mut cursor,
+                        );
                         Text::move_right(&mut cursor, &mut text, &key_event);
                         continue;
                     }
@@ -712,7 +730,6 @@ impl<'a> Text<'a> {
 
 struct SelectItem<T> {
     data: T,
-    disabled: bool,
     group: Option<String>,
 }
 
@@ -835,7 +852,6 @@ impl<'a, T> Select<'a, T> {
         for item in items.iter_mut() {
             let select_item = SelectItem {
                 data: item,
-                disabled: false,
                 group: group.map(|g| g.to_string()),
             };
             self.items.push(select_item)
@@ -845,7 +861,6 @@ impl<'a, T> Select<'a, T> {
     pub fn add_item(&mut self, item: &'a mut T, group: Option<&str>) {
         self.items.push(SelectItem {
             data: item,
-            disabled: false,
             group: group.map(|g| g.to_string()),
         });
     }
@@ -1038,7 +1053,7 @@ impl<'a, T> Select<'a, T> {
                 + (self
                     .page_size
                     .unwrap_or(self.items.len() + base_group_count)
-                    + 1) as i32
+                    + 3) as i32
                 - (th as i32 - 1))
                 .max(0) as u16;
 
@@ -1092,7 +1107,7 @@ impl<'a, T> Select<'a, T> {
                     (self
                         .page_size
                         .unwrap_or(self.items.len() + base_group_count)
-                        + 1) as u16
+                        + 3) as u16
                 ),
                 SetForegroundColor(Color::Cyan),
                 if filter_mode {
@@ -1116,7 +1131,7 @@ impl<'a, T> Select<'a, T> {
                     (self
                         .page_size
                         .unwrap_or(self.items.len() + base_group_count)
-                        + 1) as u16
+                    + 2) as u16
                 ),
             )
             .map_err(|e| UIError::Terminal(e.to_string()))?;
@@ -1170,7 +1185,9 @@ impl<'a, T> Select<'a, T> {
                 let disabled = self.disabled_items.contains(&item_i);
                 let item_string_formatted = format!(
                     "{}{}",
-                    if self.multi_selection && (!self.hybrid || (self.hybrid && selected_indices.len() > 0)) {
+                    if self.multi_selection
+                        && (!self.hybrid || (self.hybrid && selected_indices.len() > 0))
+                    {
                         format!("[{}] ", toggled_str)
                     } else {
                         String::new()
@@ -1231,7 +1248,7 @@ impl<'a, T> Select<'a, T> {
 
             crossterm::queue!(
                 stdout,
-                MoveUp(height as u16),
+                MoveUp((height + 1) as u16),
                 MoveToColumn((prompt_len + filter_cursor) as u16)
             )
             .map_err(|e| UIError::Other(e.to_string()))?;
@@ -1270,7 +1287,8 @@ impl<'a, T> Select<'a, T> {
                             continue;
                         }
                         if !self.multi_selection
-                            || (self.select_on_enter && selected_indices.is_empty()) || self.hybrid
+                            || ((self.select_on_enter || self.hybrid)
+                                && selected_indices.is_empty())
                         {
                             selected_indices.clear();
                             selected_indices.insert(
@@ -1365,8 +1383,19 @@ impl<'a, T> Select<'a, T> {
                             } else if c == 'I' {
                                 selected_index -= 3;
                                 direction = 1;
+                            } else if c == 'j' {
+                                if page_index as i64 - 1 < 0 {
+                                    page_index = max_page_index;
+                                    continue;
+                                }
+                                page_index = (page_index as i64 - 1) as usize;
+                            } else if c == 'l' {
+                                page_index = (page_index + 1) as usize;
+                                if page_index > max_page_index {
+                                    page_index = 0;
+                                }
                             }
-                            if c == '/' && self.filter_input {
+                            else if c == '/' && self.filter_input {
                                 filter_mode = true;
                             }
                             continue;
