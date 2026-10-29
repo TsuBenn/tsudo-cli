@@ -1161,7 +1161,7 @@ impl<'a, T> Select<'a, T> {
                     item_string
                 );
                 let item_string_formatted = if disabled {
-                    item_string_formatted.reset().dim().to_string()
+                    item_string_formatted.reset().dim().crossed_out().to_string()
                 } else {
                     item_string_formatted
                 };
