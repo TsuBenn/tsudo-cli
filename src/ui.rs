@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{self, MoveDown, MoveLeft, MoveRight, MoveToColumn, MoveToNextLine, MoveUp},
+    cursor::{self, MoveLeft, MoveRight, MoveToColumn, MoveToNextLine, MoveUp},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style::{
         Attribute::{self},
@@ -32,6 +32,26 @@ impl Display for UIError {
             UIError::Other(e) => write!(f, "Other: {e}"),
         }
     }
+}
+
+pub fn clean_line() {
+    crossterm::execute!(
+        stdout(),
+        MoveToColumn(0),
+        MoveUp(1),
+        Clear(terminal::ClearType::FromCursorDown),
+        MoveUp(1),
+    ).unwrap()
+}
+
+pub fn clean_lines(lines: u16) {
+    crossterm::execute!(
+        stdout(),
+        MoveToColumn(0),
+        MoveUp(lines),
+        Clear(terminal::ClearType::FromCursorDown),
+        MoveUp(1),
+    ).unwrap()
 }
 
 impl Error for UIError {}
@@ -199,6 +219,7 @@ impl<'a> Confirm<'a> {
 pub struct Text<'a> {
     message: &'a str,
     default: Option<String>,
+    validation: Option<fn(&str) -> (bool, Option<String>)>,
     hint: Option<String>,
     initial_value: String,
     suggestions: Option<Vec<String>>,
@@ -211,12 +232,18 @@ impl<'a> Text<'a> {
         Self {
             message,
             default: None,
+            validation: None,
             hint: None,
             initial_value: String::new(),
             suggestions: None,
             max_suggestions: Some(5),
             suggest_on_empty: false,
         }
+    }
+
+    pub fn with_validation(mut self, validation: fn(&str) -> (bool, Option<String>)) -> Self {
+        self.validation = Some(validation);
+        self
     }
 
     pub fn with_default(mut self, default: &str) -> Self {
@@ -384,6 +411,7 @@ impl<'a> Text<'a> {
         let mut stdout = stdout();
         let mut text = self.initial_value.clone();
         let mut cursor = text.len();
+        let mut invalid_message = String::new();
 
         crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
         crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
@@ -566,6 +594,16 @@ impl<'a> Text<'a> {
                 .map_err(|e| UIError::Other(e.to_string()))?;
             };
 
+            if !invalid_message.is_empty() {
+                crossterm::queue!(
+                    stdout,
+                    Print(invalid_message.clone().red().bold().dim()),
+                    MoveToColumn(prompt_len as u16),
+                )
+                .map_err(|e| UIError::Terminal(e.to_string()))?;
+                invalid_message.clear();
+            }
+
             stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
 
             if let Event::Key(key_event) =
@@ -661,6 +699,19 @@ impl<'a> Text<'a> {
                             &mut text,
                             &mut cursor,
                         );
+                        match self.validation {
+                            Some(validation) => {
+                                let (valid, message) = validation(&text);
+                                if !valid {
+                                    text.clear();
+                                    cursor = 0;
+                                    invalid_message =
+                                        message.unwrap_or("Invalid Input!".to_owned());
+                                    continue;
+                                }
+                            }
+                            None => {}
+                        }
                         break;
                     }
                     KeyCode::Left => {
@@ -737,6 +788,7 @@ pub struct Select<'a, T> {
     message: &'a str,
     items: Vec<SelectItem<&'a mut T>>,
     formatter: fn(&T) -> String,
+    finished_formatter: fn(&T) -> String,
     selected_color: Color,
     group_items: bool,
     disabled_items: Vec<usize>,
@@ -755,7 +807,7 @@ pub struct SelectResult<'a, T> {
     pub unselected: Vec<(usize, &'a mut T)>,
 }
 
-impl<'a, T: Clone> SelectResult<'a, T> {
+impl<'a, T> SelectResult<'a, T> {
     pub fn nth_data(&'a self, index: usize) -> &'a T {
         self.selected[index].1
     }
@@ -779,6 +831,7 @@ impl<'a, T> Select<'a, T> {
             message,
             items: Vec::new(),
             formatter,
+            finished_formatter: formatter,
             selected_color: Color::Green,
             hint: None,
             group_items: false,
@@ -791,6 +844,11 @@ impl<'a, T> Select<'a, T> {
             hybrid: false,
             select_on_enter: false,
         }
+    }
+
+    pub fn with_finished_formatter(mut self, finished_formatter: fn(&T) -> String) -> Self {
+        self.finished_formatter = finished_formatter;
+        self
     }
 
     pub fn with_select_on_enter(mut self, select_on_enter: bool) -> Self {
@@ -1053,7 +1111,7 @@ impl<'a, T> Select<'a, T> {
                 + (self
                     .page_size
                     .unwrap_or(self.items.len() + base_group_count)
-                    + 3) as i32
+                    + 4) as i32
                 - (th as i32 - 1))
                 .max(0) as u16;
 
@@ -1131,7 +1189,7 @@ impl<'a, T> Select<'a, T> {
                     (self
                         .page_size
                         .unwrap_or(self.items.len() + base_group_count)
-                    + 2) as u16
+                        + 2) as u16
                 ),
             )
             .map_err(|e| UIError::Terminal(e.to_string()))?;
@@ -1183,10 +1241,11 @@ impl<'a, T> Select<'a, T> {
                     Attributes::none()
                 };
                 let disabled = self.disabled_items.contains(&item_i);
+                let show_check_box = self.multi_selection
+                        && (!self.hybrid || (self.hybrid && selected_indices.len() > 0));
                 let item_string_formatted = format!(
                     "{}{}",
-                    if self.multi_selection
-                        && (!self.hybrid || (self.hybrid && selected_indices.len() > 0))
+                    if show_check_box
                     {
                         format!("[{}] ", toggled_str)
                     } else {
@@ -1234,7 +1293,7 @@ impl<'a, T> Select<'a, T> {
                     crossterm::queue!(
                         stdout,
                         MoveLeft((item_string.len() + (if start == 0 { 1 } else { 0 })) as u16),
-                        MoveRight(start as u16),
+                        MoveRight((start) as u16),
                         SetAttribute(Attribute::Bold),
                         SetForegroundColor(Color::Black),
                         SetBackgroundColor(Color::Cyan),
@@ -1253,10 +1312,10 @@ impl<'a, T> Select<'a, T> {
             )
             .map_err(|e| UIError::Other(e.to_string()))?;
 
-            if items.is_empty() {
-                crossterm::queue!(stdout, MoveDown(height as u16),)
-                    .map_err(|e| UIError::Other(e.to_string()))?;
-            }
+            // if items.is_empty() {
+            //     crossterm::queue!(stdout, MoveDown(height as u16))
+            //         .map_err(|e| UIError::Other(e.to_string()))?;
+            // }
 
             stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
 
@@ -1286,6 +1345,10 @@ impl<'a, T> Select<'a, T> {
                         {
                             continue;
                         }
+                        if filter_mode {
+                            filter_mode = false;
+                            continue;
+                        }
                         if !self.multi_selection
                             || ((self.select_on_enter || self.hybrid)
                                 && selected_indices.is_empty())
@@ -1294,19 +1357,12 @@ impl<'a, T> Select<'a, T> {
                             selected_indices.insert(
                                 items[page_ranges[page_index].clone()][selected_index as usize],
                             );
-                        } else {
-                            if filter_mode {
-                                filter_mode = false;
-                                continue;
-                            }
                         }
                         break;
                     }
                     KeyCode::Esc => {
                         if filter_mode {
                             filter_mode = false;
-                            continue;
-                        } else if !filter.is_empty() {
                             filter.clear();
                             filter_cursor = 0;
                             continue;
@@ -1351,6 +1407,8 @@ impl<'a, T> Select<'a, T> {
                                     selected_indices.remove(i);
                                 }
                                 continue;
+                            } else if c == 'z' && self.multi_selection {
+                                selected_indices = self.initial_selections.iter().cloned().collect()
                             }
                         }
                         if c == ' ' && !filter_mode && !items.is_empty() {
@@ -1394,8 +1452,7 @@ impl<'a, T> Select<'a, T> {
                                 if page_index > max_page_index {
                                     page_index = 0;
                                 }
-                            }
-                            else if c == '/' && self.filter_input {
+                            } else if c == '/' && self.filter_input {
                                 filter_mode = true;
                             }
                             continue;
@@ -1454,10 +1511,10 @@ impl<'a, T> Select<'a, T> {
             &mut stdout,
             &self.message,
             &self.hint,
-            &(if self.multi_selection {
+            &(if self.multi_selection && selected_indices.len() != 1 {
                 format!("Selected {} out of {}", selected_items.len(), list_size)
             } else {
-                (self.formatter)(selected_items[0].1)
+                (self.finished_formatter)(selected_items[0].1)
             }),
             Color::Green,
             Some(
@@ -1533,7 +1590,13 @@ mod test {
             .with_initial_value("Init")
             .with_auto_completion(get_test_vec())
             .with_suggest_on_empty(true)
-            // .with_max_suggestions(None)
+            .with_validation(|input| {
+                if !get_test_vec().contains(&input.to_string()) {
+                    (false, Some("Unavailable Game!".to_string()))
+                } else {
+                    (true, None)
+                }
+            })
             .with_hint("Games please")
             .prompt();
 
