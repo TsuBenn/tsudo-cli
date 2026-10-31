@@ -1,5 +1,10 @@
 use std::{
-    env, fs::{self, File}, io::{BufRead, BufReader, ErrorKind::NotFound}, path::Path, process, time::{SystemTime, UNIX_EPOCH},
+    env,
+    fs::{self, File},
+    io::{BufRead, BufReader, ErrorKind::NotFound},
+    path::Path,
+    process,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 mod todo;
@@ -61,7 +66,8 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
         } => {
             if let Ok(mut todo_list) = todo_list {
                 if all {
-                    todo_list.config.show_completed_range = None
+                    todo_list.config.show_completed_range = None;
+                    todo_list.config.hide_completed_groups = false
                 }
                 if detail {
                     todo_list.config.show_details = true
@@ -72,6 +78,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                 if pending {
                     todo_list.config.show_completed_range = Some(0)
                 }
+                todo_list.items.sort_by_key(|i| i.done);
                 todo_list.print();
             }
         }
@@ -172,6 +179,15 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                     })
                     .with_multi_selection(true)
                     .with_group_items(true)
+                    .with_collapsed_groups(if todo_list.config.hide_completed_groups {
+                        todo_list
+                            .get_completed_tags()
+                            .into_iter()
+                            .map(|s| format!("{}:", s))
+                            .collect()
+                    } else {
+                        vec![]
+                    })
                     .with_page_size(PAGE_SIZE)
                     .with_initial_selection(
                         todo_list
@@ -181,6 +197,10 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                             .filter_map(|(i, item)| if item.done { Some(i) } else { None })
                             .collect(),
                     );
+                if todo_list.config.sort_by_completion {
+                    done_multi_selection =
+                        done_multi_selection.with_sorter(|a, b| a.done.cmp(&b.done));
+                }
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
                     let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
@@ -263,9 +283,21 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                         })
                         .with_multi_selection(true)
                         .with_hybrid(true)
+                        .with_collapsed_groups(if todo_list.config.hide_completed_groups {
+                            todo_list
+                                .get_completed_tags()
+                                .into_iter()
+                                .map(|s| format!("{}:", s))
+                                .collect()
+                        } else {
+                            vec![]
+                        })
                         .with_finished_formatter(|item| item.description.clone())
                         .with_group_items(true)
                         .with_page_size(PAGE_SIZE);
+                    if todo_list.config.sort_by_completion {
+                        edit_select = edit_select.with_sorter(|a, b| a.done.cmp(&b.done));
+                    }
                     let tags = todo_list.get_tags();
                     for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                         let tag = &chunk[0].tag;
@@ -439,9 +471,22 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                     .with_multi_selection(true)
                     .with_hybrid(true)
                     .with_group_items(true)
+                    .with_collapsed_groups(if todo_list.config.hide_completed_groups {
+                        todo_list
+                            .get_completed_tags()
+                            .into_iter()
+                            .map(|s| format!("{}:", s))
+                            .collect()
+                    } else {
+                        vec![]
+                    })
                     .with_finished_formatter(|item| item.description.clone())
                     .with_page_size(PAGE_SIZE)
                     .with_selected_color(Color::Red);
+                if todo_list.config.sort_by_completion {
+                    remove_multi_selection =
+                        remove_multi_selection.with_sorter(|a, b| a.done.cmp(&b.done));
+                }
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
                     let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
@@ -496,6 +541,14 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                         format!(
                             "{:<8} Show Completed Tasks in Hour Range",
                             format!("[{}]", todo_list.config.show_completed_range.unwrap_or(0))
+                        ),
+                        format!(
+                            "{:<8} Hide Tasks in Fully Completed Groups",
+                            format!("[{}]", todo_list.config.hide_completed_groups)
+                        ),
+                        format!(
+                            "{:<8} Sort tasks by completion",
+                            format!("[{}]", todo_list.config.sort_by_completion)
                         ),
                     ];
                     option_select.add_items(&mut options, None);
@@ -595,6 +648,44 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                 }
                                 break;
                             }
+                            3 => {
+                                let confirm = Confirm::new("Hide Tasks in Fully Completed Groups?")
+                                    .with_default(todo_list.config.hide_completed_groups)
+                                    .prompt();
+                                match confirm {
+                                    Ok(yes) => {
+                                        todo_list.config.hide_completed_groups = yes;
+                                        break;
+                                    }
+                                    Err(ui::UIError::Canceled) => {
+                                        ui::clean_line();
+                                        continue;
+                                    }
+                                    Err(err) => process::exit(handle_ui_error(
+                                        err,
+                                        "Config has been left unchanged!",
+                                    )),
+                                }
+                            }
+                            4 => {
+                                let confirm = Confirm::new("Sort tasks by completion?")
+                                    .with_default(todo_list.config.sort_by_completion)
+                                    .prompt();
+                                match confirm {
+                                    Ok(yes) => {
+                                        todo_list.config.sort_by_completion = yes;
+                                        break;
+                                    }
+                                    Err(ui::UIError::Canceled) => {
+                                        ui::clean_line();
+                                        continue;
+                                    }
+                                    Err(err) => process::exit(handle_ui_error(
+                                        err,
+                                        "Config has been left unchanged!",
+                                    )),
+                                }
+                            }
                             _ => {}
                         },
                         Err(err) => {
@@ -623,9 +714,21 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                     })
                     .with_finished_formatter(|i| i.description.clone())
                     .with_multi_selection(true)
+                    .with_collapsed_groups(if todo_list.config.hide_completed_groups {
+                        todo_list
+                            .get_completed_tags()
+                            .into_iter()
+                            .map(|s| format!("{}:", s))
+                            .collect()
+                    } else {
+                        vec![]
+                    })
                     .with_hybrid(true)
                     .with_group_items(true)
                     .with_page_size(PAGE_SIZE);
+                if todo_list.config.sort_by_completion {
+                    task_select = task_select.with_sorter(|a, b| a.done.cmp(&b.done));
+                }
                 for chunk in todo_list.items.chunk_by_mut(|a, b| a.tag == b.tag) {
                     let tag = &chunk[0].tag;
                     let group = format!("{}:", if tag.is_empty() { "__untagged__" } else { tag });
@@ -990,10 +1093,12 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                                 match option_confirmation {
                                                     Ok(true) => {
                                                         if initial_journal_selected == 0 {
-                                                            break
+                                                            break;
                                                         }
                                                         snapshot.config = original_config;
+                                                        let current_path = todo_list.path;
                                                         todo_list = snapshot;
+                                                        todo_list.path = current_path;
                                                         if let Err(err) = todo_list.save(
                                                             TodoAction::Revert(selected.timestamp),
                                                         ) {

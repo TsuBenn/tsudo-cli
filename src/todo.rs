@@ -34,19 +34,28 @@ pub struct TodoListConfig {
     pub show_date: bool,
     pub show_progress: bool,
     pub show_completed_range: Option<u64>,
+    pub hide_completed_groups: bool,
     pub show_details: bool,
+    #[serde(default = "default_bool")]
+    pub sort_by_completion: bool,
+}
+
+fn default_bool() -> bool {
+    true
 }
 
 fn default_config() -> TodoListConfig {
     TodoListConfig {
         show_date: false,
         show_progress: true,
-        show_completed_range: Some(36),
+        show_completed_range: Some(6),
+        hide_completed_groups: true,
         show_details: false,
+        sort_by_completion: false,
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TodoItem {
     pub timestamp: u64,
     pub completed_timestamp: Option<u64>,
@@ -151,6 +160,7 @@ PROJECT:
                 Show Creation/Completion Time of tasks
                 Show Progress Tasks Groups (Grouped by Tags)
                 Show Completed Tasks within a Range (hour)
+                Hide Completed Task Groups
 
 EXAMPLES:
     todo new Buy some milk
@@ -173,12 +183,12 @@ pub enum TodoAction {
     Add(TodoItem),
     Complete(Vec<TodoItem>, Vec<TodoItem>),
     Remove(Vec<TodoItem>),
-    EditBulk{
+    EditBulk {
         edited: Vec<TodoItem>,
         old_tag: String,
         new_tag: String,
     },
-    EditSingular{
+    EditSingular {
         edited: TodoItem,
         old_desc: String,
         new_desc: Option<String>,
@@ -187,9 +197,9 @@ pub enum TodoAction {
         old_tag: String,
         new_tag: Option<String>,
     },
-    Config{
+    Config {
         old: TodoListConfig,
-        new: TodoListConfig
+        new: TodoListConfig,
     },
     Revert(u64),
 }
@@ -209,6 +219,19 @@ impl TodoList {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect()
+    }
+    pub fn get_completed_tags(&self) -> Vec<String> {
+        let mut completed_tags = Vec::new();
+        for chunk in self.items.chunk_by(|a, b| a.tag == b.tag) {
+            if !chunk.iter().any(|i| !i.done) {
+                let mut tag = chunk[0].tag.clone();
+                if tag.is_empty() {
+                    tag = "__untagged__".to_string()
+                }
+                completed_tags.push(tag);
+            }
+        }
+        completed_tags
     }
     pub fn add(&mut self, description: String, tag: String) -> u64 {
         let item = TodoItem::new(description, tag);
@@ -279,18 +302,32 @@ impl TodoList {
         for chunk in self.items.chunk_by(|a, b| a.tag == b.tag) {
             let tag = &chunk[0].tag;
             let done_count = chunk.iter().filter(|i| i.done).count();
+            let pct_string = format!(
+                "({}%)",
+                ((done_count as f64 / chunk.len() as f64) * 100.0).round()
+            );
+            let fully_completed = !chunk.iter().any(|i| !i.done);
             let tag_string = format!(
-                "{}{}:",
+                "{}{}{}",
                 if tag.is_empty() { "__untagged__" } else { tag },
                 if self.config.show_progress {
                     format!(
-                        " [{}/{}] ({}%)",
+                        " [{}/{}] {}",
                         done_count,
                         chunk.len(),
-                        ((done_count as f64 / chunk.len() as f64) * 100.0).round()
+                        if done_count == chunk.len() {
+                            pct_string.green().to_string()
+                        } else {
+                            pct_string
+                        }
                     )
                 } else {
                     String::new()
+                },
+                if self.config.hide_completed_groups && fully_completed {
+                    " [Hidden]".dim().cyan().italic().to_string()
+                } else {
+                    ":".to_string()
                 }
             );
             if tag.is_empty() {
@@ -299,12 +336,18 @@ impl TodoList {
                 println!(" {}", tag_string.bold().italic().cyan());
             }
             lines += 1;
+            if self.config.hide_completed_groups && fully_completed {
+                continue
+            }
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
                 .as_millis() as u64;
             let mut printed = 0;
             for item in chunk {
+                if self.config.hide_completed_groups && fully_completed {
+                    continue
+                }
                 if let Some(range) = self.config.show_completed_range {
                     if item.done && (now - item.completed_timestamp.unwrap_or(0)) >= range * 3600000
                     {
@@ -436,7 +479,7 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                             ));
                         }
                     },
-                    Err(e) => return Err(TodoFindError::Other(e.to_string()))
+                    Err(e) => return Err(TodoFindError::Other(e.to_string())),
                 }
             } else {
                 let mut todo_list = TodoList::new();

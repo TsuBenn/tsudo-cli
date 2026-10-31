@@ -1,9 +1,5 @@
 use std::{
-    collections::HashSet,
-    error::Error,
-    fmt::Display,
-    io::{Stdout, Write, stdout},
-    ops::Range,
+    cmp::Ordering, collections::HashSet, error::Error, fmt::Display, io::{Stdout, Write, stdout}, ops::Range,
 };
 
 use crossterm::{
@@ -781,9 +777,11 @@ impl<'a> Text<'a> {
     }
 }
 
+#[derive(Clone)]
 struct SelectItem<T> {
     data: T,
     group: Option<String>,
+    collapsed: bool,
 }
 
 pub struct Select<'a, T> {
@@ -791,8 +789,10 @@ pub struct Select<'a, T> {
     items: Vec<SelectItem<&'a mut T>>,
     formatter: fn(&T) -> String,
     finished_formatter: fn(&T) -> String,
+    sorter: Option<fn(&T, &T) -> Ordering>,
     selected_color: Color,
     group_items: bool,
+    collapsed_groups: Vec<String>,
     disabled_items: Vec<usize>,
     hint: Option<String>,
     page_size: Option<usize>,
@@ -834,9 +834,11 @@ impl<'a, T> Select<'a, T> {
             items: Vec::new(),
             formatter,
             finished_formatter: formatter,
+            sorter: None,
             selected_color: Color::Green,
             hint: None,
             group_items: false,
+            collapsed_groups: Vec::new(),
             disabled_items: Vec::new(),
             page_size: None,
             initial_selections: Vec::new(),
@@ -846,6 +848,16 @@ impl<'a, T> Select<'a, T> {
             hybrid: false,
             select_on_enter: false,
         }
+    }
+
+    pub fn with_sorter(mut self, sorter: fn(&T, &T) -> Ordering) -> Self {
+        self.sorter = Some(sorter);
+        self
+    }
+
+    pub fn with_collapsed_groups(mut self, collaped_groups: Vec<String>) -> Self {
+        self.collapsed_groups = collaped_groups;
+        self
     }
 
     pub fn with_finished_formatter(mut self, finished_formatter: fn(&T) -> String) -> Self {
@@ -913,6 +925,7 @@ impl<'a, T> Select<'a, T> {
             let select_item = SelectItem {
                 data: item,
                 group: group.map(|g| g.to_string()),
+                collapsed: false,
             };
             self.items.push(select_item)
         }
@@ -922,6 +935,7 @@ impl<'a, T> Select<'a, T> {
         self.items.push(SelectItem {
             data: item,
             group: group.map(|g| g.to_string()),
+            collapsed: false,
         });
     }
 
@@ -1019,7 +1033,27 @@ impl<'a, T> Select<'a, T> {
         }
     }
 
-    pub fn prompt(self) -> Result<SelectResult<'a, T>, UIError> {
+    fn get_filtered_items(&mut self) -> Vec<usize> {
+        let mut filtered_items = Vec::new();
+        let mut group = None;
+        for (i, item) in self.items.iter_mut().enumerate() {
+            if let Some(item_group) = &item.group {
+                if self.collapsed_groups.contains(&item_group) {
+                    item.collapsed = true;
+                    if item.group == group {
+                        continue;
+                    }
+                }
+            }
+            if item.group != group {
+                group = item.group.clone()
+            }
+            filtered_items.push(i);
+        }
+        filtered_items
+    }
+
+    pub fn prompt(mut self) -> Result<SelectResult<'a, T>, UIError> {
         let mut stdout = stdout();
         let mut filter = self.initial_filter.clone();
         let mut filter_cursor = 0;
@@ -1029,12 +1063,25 @@ impl<'a, T> Select<'a, T> {
         let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
         let mut direction = 0;
 
+        if let Some(sorter) = self.sorter {
+            let mut indexed_items: Vec<_> = self.items.into_iter().enumerate().collect();
+            indexed_items.sort_by(|(_, a), (_, b)| sorter(a.data, b.data));
+            let mut old_to_new = vec![0; indexed_items.len()];
+            self.items = indexed_items.into_iter().enumerate().map(|(new, (old, item))| {old_to_new[old] = new; item}).collect();
+            for idx in &mut self.initial_selections {
+                *idx = old_to_new[*idx];
+            }
+        }
+
+        let filtered_items = self.get_filtered_items();
         let mut items = self
             .items
             .iter()
             .enumerate()
             .filter_map(|(i, item)| {
-                if self.match_filter(item, &filter) {
+                if (filtered_items.contains(&i) || !filter.is_empty())
+                    && self.match_filter(item, &filter)
+                {
                     Some(i)
                 } else {
                     None
@@ -1078,13 +1125,17 @@ impl<'a, T> Select<'a, T> {
             ""
         };
 
+        let mut save_state = None;
+
         loop {
             items = self
                 .items
                 .iter()
                 .enumerate()
                 .filter_map(|(i, item)| {
-                    if self.match_filter(item, &filter) {
+                    if (filtered_items.contains(&i) || !filter.is_empty())
+                        && self.match_filter(item, &filter)
+                    {
                         Some(i)
                     } else {
                         None
@@ -1273,21 +1324,33 @@ impl<'a, T> Select<'a, T> {
                 let disabled = self.disabled_items.contains(&item_i);
                 let show_check_box = self.multi_selection
                     && (!self.hybrid || (self.hybrid && selected_indices.len() > 0));
-                let item_string_formatted = format!(
-                    "{}{}",
-                    if show_check_box {
-                        format!("[{}] ", toggled_str)
-                    } else {
-                        String::new()
-                    },
-                    item_string
-                );
+                let item_string_formatted = if item.collapsed && filter.is_empty() {
+                    format!(
+                        "{}[{} collapsed items]",
+                        if show_check_box {
+                            format!("[-] ")
+                        } else {
+                            String::new()
+                        },
+                        self.items.iter().filter(|i| i.group == item.group).count()
+                    )
+                    .dim()
+                    .italic()
+                    .cyan()
+                } else {
+                    format!(
+                        "{}{}",
+                        if show_check_box {
+                            format!("[{}] ", toggled_str)
+                        } else {
+                            String::new()
+                        },
+                        item_string
+                    )
+                    .reset()
+                };
                 let item_string_formatted = if disabled {
-                    item_string_formatted
-                        .reset()
-                        .dim()
-                        .crossed_out()
-                        .to_string()
+                    item_string_formatted.reset().dim().crossed_out()
                 } else {
                     item_string_formatted
                 };
@@ -1369,6 +1432,23 @@ impl<'a, T> Select<'a, T> {
                         if result == 0 {
                             continue;
                         }
+                        if filter.is_empty() {
+                            let item = &self.items[page_ranges[page_index].clone()]
+                                [selected_index as usize];
+                            if item.collapsed {
+                                match &item.group {
+                                    Some(group) => {
+                                        filter = format!("%{} - ", group);
+                                        filter_cursor = filter.len();
+                                        save_state = Some((page_index, selected_index));
+                                        selected_index = 0;
+                                        page_index = 0;
+                                    }
+                                    None => {}
+                                };
+                                continue;
+                            }
+                        }
                         if let Some(index) = &item_slice.get(selected_index as usize)
                             && self.disabled_items.contains(&index)
                         {
@@ -1392,8 +1472,18 @@ impl<'a, T> Select<'a, T> {
                     KeyCode::Esc => {
                         if filter_mode {
                             filter_mode = false;
+                        }
+                        if !filter.is_empty() {
                             filter.clear();
                             filter_cursor = 0;
+                            match save_state {
+                                Some((i, si)) => {
+                                    page_index = i;
+                                    selected_index = si;
+                                    save_state = None
+                                }
+                                None => {}
+                            }
                             continue;
                         }
                         render_prompt(
@@ -1639,6 +1729,7 @@ mod test {
         let mut select = Select::<String>::new("Select something please", |i| i.clone())
             .with_hint("Game please")
             .with_page_size(6)
+            .with_collapsed_groups(vec!["Separator 2 desu:".to_owned()])
             .with_disabled_items(vec![0, get_test_vec().len() - 1])
             .with_group_items(true);
         let mut first = get_test_vec();
