@@ -1,10 +1,5 @@
 use std::{
-    env,
-    fs::{self, File},
-    io::{BufRead, BufReader},
-    path::Path,
-    process,
-    time::{SystemTime, UNIX_EPOCH},
+    env, fs::{self, File}, io::{BufRead, BufReader, ErrorKind::NotFound}, path::Path, process, time::{SystemTime, UNIX_EPOCH},
 };
 
 mod todo;
@@ -17,8 +12,8 @@ use tsudo::ui::{self, Confirm, Select, Text, clean_line, clean_lines};
 use crate::todo::*;
 
 const PAGE_SIZE: usize = 30;
-const DONE_PREFIX: &'static str = "Done";
-const PENDING_PREFIX: &'static str = " -- ";
+const DONE_PREFIX: &'static str = "✓";
+const PENDING_PREFIX: &'static str = " ";
 
 fn handle_ui_error(err: ui::UIError, cancel_message: &str) -> i32 {
     match err {
@@ -259,7 +254,12 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                     let mut edit_select =
                         Select::<TodoItem>::new("Select a Task or multiple Tasks to edit", |i| {
                             let status = if i.done { DONE_PREFIX } else { PENDING_PREFIX };
-                            format!(" {}  {}", status, i.description)
+                            let detail_status = if i.detail.is_empty() {
+                                "".reset()
+                            } else {
+                                " [+]".cyan().bold()
+                            };
+                            format!(" {} {}{}", status, i.description, detail_status)
                         })
                         .with_multi_selection(true)
                         .with_hybrid(true)
@@ -295,17 +295,27 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                 .map(|(_, item)| item.timestamp)
                                 .collect();
                             let mut edited_item_clone = vec![];
+                            let old_tag;
+                            let mut new_tag = None;
+                            let old_desc;
+                            let mut new_desc = None;
+                            let old_detail;
+                            let mut new_detail = None;
                             match field_select.prompt() {
                                 Ok(result) => match result.index() {
                                     0 => {
                                         let selected = task_result.data_mut();
+                                        old_desc = selected.description.clone();
+                                        old_tag = selected.tag.clone();
+                                        old_detail = selected.detail.clone();
                                         match Text::new("Enter new Task description")
                                             .with_default(&selected.description)
                                             .with_initial_value(&selected.description)
                                             .prompt()
                                         {
-                                            Ok(new_description) => {
-                                                selected.description = new_description;
+                                            Ok(new) => {
+                                                new_desc = Some(new.clone());
+                                                selected.description = new;
                                                 edited_item_clone.push(selected.clone());
                                             }
                                             Err(err) => process::exit(handle_ui_error(
@@ -316,13 +326,17 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                     }
                                     1 => {
                                         let selected = task_result.data_mut();
+                                        old_desc = selected.description.clone();
+                                        old_tag = selected.tag.clone();
+                                        old_detail = selected.detail.clone();
                                         match Text::new("Enter new Task Detail")
                                             .with_default(&selected.detail)
                                             .with_initial_value(&selected.detail)
                                             .prompt()
                                         {
-                                            Ok(new_detail) => {
-                                                selected.detail = new_detail;
+                                            Ok(new) => {
+                                                new_detail = Some(new.clone());
+                                                selected.detail = new;
                                                 edited_item_clone.push(selected.clone());
                                             }
                                             Err(err) => process::exit(handle_ui_error(
@@ -333,19 +347,32 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                     }
                                     2 => {
                                         match Text::new(if multi_selected {
-                                            "Enter new Tasks Tag"
+                                            "Enter new Tag for Tasks"
                                         } else {
-                                            "Enter new Task Tag"
+                                            "Enter new Tag for Task"
                                         })
                                         .with_auto_completion(tags)
                                         .with_suggest_on_empty(true)
                                         .prompt()
                                         {
-                                            Ok(new_tag) => {
-                                                for (_, item) in task_result.selected {
-                                                    item.tag = new_tag.clone();
-                                                    edited_item_clone.push(item.clone());
+                                            Ok(new) => {
+                                                {
+                                                    let selected = task_result.data();
+                                                    old_desc = selected.description.clone();
+                                                    old_tag = selected.tag.clone();
+                                                    old_detail = selected.detail.clone();
                                                 }
+
+                                                if multi_selected {
+                                                    for (_, item) in task_result.selected {
+                                                        item.tag = new.clone();
+                                                        edited_item_clone.push(item.clone());
+                                                    }
+                                                } else {
+                                                    let selected = task_result.data_mut();
+                                                    selected.tag = new.clone();
+                                                }
+                                                new_tag = Some(new.clone());
                                             }
                                             Err(err) => process::exit(handle_ui_error(
                                                 err,
@@ -353,7 +380,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                             )),
                                         }
                                     }
-                                    _ => {}
+                                    _ => break,
                                 },
                                 Err(ui::UIError::Canceled) => {
                                     ui::clean_line();
@@ -364,7 +391,23 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                 }
                             }
                             todo_list.sort();
-                            if let Err(err) = todo_list.save(TodoAction::Edit(edited_item_clone)) {
+                            if let Err(err) = todo_list.save(if multi_selected {
+                                TodoAction::EditBulk {
+                                    edited: edited_item_clone,
+                                    old_tag,
+                                    new_tag: new_tag.unwrap(),
+                                }
+                            } else {
+                                TodoAction::EditSingular {
+                                    edited: edited_item_clone[0].clone(),
+                                    old_desc,
+                                    new_desc,
+                                    old_detail,
+                                    new_detail,
+                                    old_tag,
+                                    new_tag,
+                                }
+                            }) {
                                 process::exit(handle_save_error(err))
                             }
                             todo_list.print_highlight(
@@ -386,7 +429,12 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                 let mut remove_multi_selection =
                     Select::<TodoItem>::new("Select a Task or Multiple Tasks for removal", |i| {
                         let status = if i.done { DONE_PREFIX } else { PENDING_PREFIX };
-                        format!(" {}  {}", status, i.description)
+                        let detail_status = if i.detail.is_empty() {
+                            "".reset()
+                        } else {
+                            " [+]".cyan().bold()
+                        };
+                        format!(" {} {}{}", status, i.description, detail_status)
                     })
                     .with_multi_selection(true)
                     .with_hybrid(true)
@@ -431,6 +479,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
         }
         Command::Config => {
             if let Ok(mut todo_list) = todo_list {
+                let old_config = todo_list.config.clone();
                 loop {
                     let mut option_select =
                         Select::<String>::new("Selected a config option to change", |i| i.clone())
@@ -553,7 +602,10 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                         }
                     }
                 }
-                if let Err(err) = todo_list.save(TodoAction::Config(todo_list.config.clone())) {
+                if let Err(err) = todo_list.save(TodoAction::Config {
+                    old: old_config,
+                    new: todo_list.config.clone(),
+                }) {
                     process::exit(handle_save_error(err))
                 }
             }
@@ -683,10 +735,19 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                             eprintln!("Can't fetch journal.");
                             process::exit(1);
                         });
-                let file = File::open(journal_file).unwrap_or_else(|e| {
-                    eprintln!("Can't open journal. {e}");
-                    process::exit(1);
-                });
+                let file = match File::open(journal_file) {
+                    Ok(file) => file,
+                    Err(err) => match err.kind() {
+                        NotFound => {
+                            eprintln!("Journal is empty! Try doing something first");
+                            process::exit(1);
+                        }
+                        _ => {
+                            eprintln!("Can't open journal. {}", err.to_string());
+                            process::exit(1);
+                        }
+                    },
+                };
 
                 let reader = BufReader::new(file);
 
@@ -706,9 +767,11 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                 journals.reverse();
 
                 if journals.is_empty() {
-                    eprintln!("Journal is empty!");
+                    eprintln!("Journal is empty! Try doing something first");
                     process::exit(1);
                 }
+
+                let mut initial_journal_selected = 0;
 
                 loop {
                     let mut journal_select =
@@ -724,7 +787,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                             match &j.action {
                                 TodoAction::Add(item) => {
                                     action_string =
-                                        format!("Added \"{}\"", truncate(&item.description, 50));
+                                        format!("Added [{}]", truncate(&item.description, 50));
                                 }
                                 TodoAction::Complete(completed, uncompleted) => {
                                     action_string = format!(
@@ -736,11 +799,84 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                 TodoAction::Remove(items) => {
                                     action_string = format!("Removed {} Tasks", items.len());
                                 }
-                                TodoAction::Edit(items) => {
-                                    action_string = format!("Edited {} Tasks", items.len());
+                                TodoAction::EditBulk {
+                                    edited,
+                                    old_tag,
+                                    new_tag,
+                                } => {
+                                    action_string = format!(
+                                        "Edited Tags of {} Tasks from [{}] to [{}]",
+                                        edited.len(),
+                                        old_tag,
+                                        new_tag
+                                    );
                                 }
-                                TodoAction::Config(_) => {
-                                    action_string = format!("Modified Config");
+                                TodoAction::EditSingular {
+                                    edited,
+                                    old_desc,
+                                    new_desc,
+                                    old_detail,
+                                    new_detail,
+                                    old_tag,
+                                    new_tag,
+                                } => {
+                                    let description_changed = match new_desc {
+                                        Some(new_desc) => {
+                                            format!(
+                                                "Description: [{}] -> [{}]",
+                                                truncate(old_desc, 20),
+                                                truncate(new_desc, 20)
+                                            )
+                                        }
+                                        None => String::new(),
+                                    };
+                                    let detail_changed = match new_detail {
+                                        Some(new_detail) => {
+                                            format!(
+                                                "Detail: [{}] -> [{}]",
+                                                truncate(old_detail, 20),
+                                                truncate(new_detail, 20)
+                                            )
+                                        }
+                                        None => String::new(),
+                                    };
+                                    let tag_changed = match new_tag {
+                                        Some(new_tag) => {
+                                            format!(
+                                                "Tag: [{}] -> [{}]",
+                                                truncate(old_tag, 20),
+                                                truncate(new_tag, 20)
+                                            )
+                                        }
+                                        None => String::new(),
+                                    };
+                                    action_string = format!(
+                                        "Edited Task [{}]. {}{}{}",
+                                        truncate(&edited.description, 20),
+                                        description_changed,
+                                        detail_changed,
+                                        tag_changed
+                                    );
+                                }
+                                TodoAction::Config { old, new } => {
+                                    let mut changed = String::new();
+                                    if old.show_date != new.show_date {
+                                        changed = format!(
+                                            "Show date: {} -> {}",
+                                            old.show_date, new.show_date
+                                        )
+                                    } else if old.show_progress != new.show_progress {
+                                        changed = format!(
+                                            "Show Group Progress: {} -> {}",
+                                            old.show_progress, new.show_progress
+                                        )
+                                    } else if old.show_completed_range != new.show_completed_range {
+                                        changed = format!(
+                                            "Show Completed Range: {:?} -> {:?}",
+                                            old.show_completed_range, new.show_completed_range
+                                        )
+                                    }
+                                    action_string = format!("Modified Config. {}", changed);
                                 }
                                 TodoAction::Revert(timestamp) => {
                                     action_string = format!("Reverted back to {}", timestamp);
@@ -749,10 +885,12 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
 
                             format!("{} [{}] {}", j.timestamp, time_string, action_string)
                         })
-                        .with_page_size(PAGE_SIZE.min(journals.len()));
+                        .with_page_size(PAGE_SIZE.min(journals.len()))
+                        .with_initial_selection(vec![initial_journal_selected]);
                     journal_select.add_items(&mut journals, None);
                     match journal_select.prompt() {
                         Ok(mut result) => {
+                            initial_journal_selected = result.selected[0].0;
                             let selected = result.data_mut();
                             if let Ok(snapshot_file) = base_path
                                 .join(HISTORY_DIR)
@@ -762,15 +900,103 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) {
                                 match fs::read_to_string(&snapshot_file) {
                                     Ok(content) => {
                                         match serde_json::from_str::<TodoList>(&content) {
-                                            Ok(snapshot) => {
-                                                let lines = snapshot.print();
+                                            Ok(mut snapshot) => {
+                                                let original_config = snapshot.config.clone();
+                                                snapshot.config.show_completed_range = None;
+                                                let lines = match &selected.action {
+                                                    TodoAction::Add(added) => snapshot
+                                                        .print_highlight(
+                                                            &[added.timestamp],
+                                                            Some(Color::Yellow),
+                                                            Some(
+                                                                Attributes::default()
+                                                                    .with(Attribute::Bold),
+                                                            ),
+                                                        ),
+                                                    TodoAction::Complete(
+                                                        completed,
+                                                        uncompleted,
+                                                    ) => {
+                                                        completed
+                                                            .clone()
+                                                            .append(&mut uncompleted.clone());
+                                                        snapshot.print_highlight(
+                                                            &completed
+                                                                .iter()
+                                                                .map(|item| item.timestamp)
+                                                                .collect::<Vec<_>>(),
+                                                            Some(Color::Yellow),
+                                                            Some(
+                                                                Attributes::default()
+                                                                    .with(Attribute::Bold),
+                                                            ),
+                                                        )
+                                                    }
+                                                    TodoAction::Remove(removed) => {
+                                                        for item in removed {
+                                                            snapshot.items.push(item.clone());
+                                                        }
+                                                        snapshot.sort();
+                                                        snapshot.print_highlight(
+                                                            &removed
+                                                                .iter()
+                                                                .map(|item| item.timestamp)
+                                                                .collect::<Vec<_>>(),
+                                                            Some(Color::Red),
+                                                            Some(
+                                                                Attributes::default()
+                                                                    .with(Attribute::Bold)
+                                                                    .with(Attribute::CrossedOut),
+                                                            ),
+                                                        )
+                                                    }
+                                                    TodoAction::EditBulk {
+                                                        edited,
+                                                        old_tag: _,
+                                                        new_tag: _,
+                                                    } => snapshot.print_highlight(
+                                                        &edited
+                                                            .iter()
+                                                            .map(|item| item.timestamp)
+                                                            .collect::<Vec<_>>(),
+                                                        Some(Color::Yellow),
+                                                        Some(
+                                                            Attributes::default()
+                                                                .with(Attribute::Bold),
+                                                        ),
+                                                    ),
+                                                    TodoAction::EditSingular {
+                                                        edited,
+                                                        old_desc: _,
+                                                        new_desc: _,
+                                                        old_detail: _,
+                                                        new_detail: _,
+                                                        old_tag: _,
+                                                        new_tag: _,
+                                                    } => snapshot.print_highlight(
+                                                        &[edited.timestamp],
+                                                        Some(Color::Yellow),
+                                                        Some(
+                                                            Attributes::default()
+                                                                .with(Attribute::Bold),
+                                                        ),
+                                                    ),
+                                                    TodoAction::Config { old: _, new: _ }
+                                                    | TodoAction::Revert(_) => snapshot.print(),
+                                                };
                                                 let option_confirmation =
                                                     Confirm::new("Revert to this version?")
                                                         .prompt();
                                                 match option_confirmation {
                                                     Ok(true) => {
+                                                        if initial_journal_selected == 0 {
+                                                            break
+                                                        }
+                                                        snapshot.config = original_config;
                                                         todo_list = snapshot;
-                                                        if let Err(err) = todo_list.save(TodoAction::Revert(selected.timestamp)) {
+                                                        if let Err(err) = todo_list.save(
+                                                            TodoAction::Revert(selected.timestamp),
+                                                        ) {
                                                             process::exit(handle_save_error(err))
                                                         }
                                                     }

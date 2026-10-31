@@ -41,7 +41,8 @@ pub fn clean_line() {
         MoveUp(1),
         Clear(terminal::ClearType::FromCursorDown),
         MoveUp(1),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 pub fn clean_lines(lines: u16) {
@@ -51,7 +52,8 @@ pub fn clean_lines(lines: u16) {
         MoveUp(lines),
         Clear(terminal::ClearType::FromCursorDown),
         MoveUp(1),
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 impl Error for UIError {}
@@ -95,7 +97,7 @@ fn render_prompt(
     Ok(strip_ansi_escapes::strip_str(&prompt).len())
 }
 
-fn cleanup_terminal(stdout: &mut Stdout, report_cancel: bool) -> Result<(), UIError> {
+pub fn cleanup_terminal(stdout: &mut Stdout, report_cancel: bool) -> Result<(), UIError> {
     crossterm::execute!(
         stdout,
         cursor::Show,
@@ -1027,7 +1029,20 @@ impl<'a, T> Select<'a, T> {
         let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
         let mut direction = 0;
 
-        let mut items;
+        let mut items = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, item)| {
+                if self.match_filter(item, &filter) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
 
         let mut max_page_index;
 
@@ -1039,6 +1054,21 @@ impl<'a, T> Select<'a, T> {
         let mut selected_indices: HashSet<usize> = if self.multi_selection {
             self.initial_selections.iter().cloned().collect()
         } else {
+            if !self.initial_selections.is_empty() {
+                for (i, range) in page_ranges.iter().enumerate() {
+                    match range
+                        .clone()
+                        .into_iter()
+                        .position(|i| i == self.initial_selections[0])
+                    {
+                        Some(ii) => {
+                            page_index = i;
+                            selected_index = ii as i64;
+                        }
+                        None => {}
+                    }
+                }
+            }
             HashSet::new()
         };
 
@@ -1242,11 +1272,10 @@ impl<'a, T> Select<'a, T> {
                 };
                 let disabled = self.disabled_items.contains(&item_i);
                 let show_check_box = self.multi_selection
-                        && (!self.hybrid || (self.hybrid && selected_indices.len() > 0));
+                    && (!self.hybrid || (self.hybrid && selected_indices.len() > 0));
                 let item_string_formatted = format!(
                     "{}{}",
-                    if show_check_box
-                    {
+                    if show_check_box {
                         format!("[{}] ", toggled_str)
                     } else {
                         String::new()

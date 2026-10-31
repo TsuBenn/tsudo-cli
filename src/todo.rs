@@ -173,8 +173,24 @@ pub enum TodoAction {
     Add(TodoItem),
     Complete(Vec<TodoItem>, Vec<TodoItem>),
     Remove(Vec<TodoItem>),
-    Edit(Vec<TodoItem>),
-    Config(TodoListConfig),
+    EditBulk{
+        edited: Vec<TodoItem>,
+        old_tag: String,
+        new_tag: String,
+    },
+    EditSingular{
+        edited: TodoItem,
+        old_desc: String,
+        new_desc: Option<String>,
+        old_detail: String,
+        new_detail: Option<String>,
+        old_tag: String,
+        new_tag: Option<String>,
+    },
+    Config{
+        old: TodoListConfig,
+        new: TodoListConfig
+    },
     Revert(u64),
 }
 
@@ -297,7 +313,7 @@ impl TodoList {
                 };
                 printed += 1;
                 lines += 1;
-                let status = if item.done { "[✔]" } else { "[ ]" };
+                let status = if item.done { "[✓]" } else { "[ ]" };
                 let time_string = if self.config.show_date {
                     let timestamp = item.completed_timestamp.unwrap_or(item.timestamp);
                     format!("{:>16}  ", get_time_format(timestamp))
