@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{ffi::OsString, time::{SystemTime, UNIX_EPOCH}};
+
+use crate::todo::DIR;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TodoJournal {
@@ -46,8 +48,12 @@ impl TodoItem {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TodoList {
     pub items: Vec<TodoItem>,
-    pub path: String,
+    pub path: OsString,
     pub config: TodoListConfig,
+}
+
+fn default_path() -> OsString {
+    DIR.to_string().into()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,7 +89,7 @@ pub enum TodoListError {
 
 pub enum TodoFindError {
     NotFound,
-    Invalid(String),
+    Invalid(OsString),
     Other(String),
 }
 

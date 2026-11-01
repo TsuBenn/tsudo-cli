@@ -177,13 +177,14 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                 match fs::read_to_string(&file_path) {
                     Ok(content) => match serde_json::from_str::<TodoList>(&content) {
                         Ok(mut todo_list) => {
-                            todo_list.path = dir_path.into_string().unwrap_or(DIR.to_string());
+                            todo_list.path = dir_path.into_os_string();
                             todo_list.sort();
                             return Ok(todo_list);
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            eprintln!("\n  {e}\n");
                             return Err(TodoFindError::Invalid(
-                                file_path.into_string().unwrap_or(FILE.to_string()),
+                                file_path.into_os_string(),
                             ));
                         }
                     },
@@ -191,7 +192,7 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                 }
             } else {
                 let mut todo_list = TodoList::new();
-                todo_list.path = file_path.into_string().unwrap_or(FILE.to_string());
+                todo_list.path = file_path.into_os_string();
                 return Ok(todo_list);
             }
         }

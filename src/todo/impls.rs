@@ -35,7 +35,7 @@ impl TodoList {
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
-            path: DIR.to_string(),
+            path: DIR.to_string().into(),
             config: default_config(),
         }
     }
@@ -75,22 +75,19 @@ impl TodoList {
         let path = Path::new(&self.path);
         let file = path
             .join(FILE)
-            .into_string()
-            .unwrap_or(format!("{}/{}", DIR, FILE));
+            .into_os_string();
         let history = path.join(HISTORY_DIR);
         let gitignore = path.join(".gitignore");
         let journal_file = path
             .join(JOURNAL)
-            .into_string()
-            .unwrap_or(format!("{}/{}", DIR, JOURNAL));
+            .into_os_string();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_millis() as u64;
         let history_file = history
             .join(format!("{}.json", timestamp))
-            .into_string()
-            .unwrap_or(format!("{}/{}/{}.json", DIR, HISTORY_DIR, timestamp));
+            .into_os_string();
         let content =
             serde_json::to_string(self).map_err(|e| TodoListError::SaveError(e.to_string()))?;
         let journal = TodoJournal { action, timestamp };

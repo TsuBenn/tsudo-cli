@@ -17,10 +17,7 @@ use crossterm::style::{Attribute, Attributes};
 pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> {
     if let Ok(mut todo_list) = todo_list {
         let base_path = Path::new(&todo_list.path);
-        let journal_file = base_path.join(JOURNAL).into_string().map_err(|_| {
-            eprintln!("\n  Can't fetch journal.\n");
-            1
-        })?;
+        let journal_file = base_path.join(JOURNAL).into_os_string();
         let file = match File::open(journal_file) {
             Ok(file) => file,
             Err(err) => match err.kind() {
@@ -181,166 +178,159 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                 .map_err(|err| handle_ui_error(err, "Config has been left unchanged!"))?;
             initial_journal_selected = result.selected[0].0;
             let selected = result.data_mut();
-            if let Ok(snapshot_file) = base_path
+            let snapshot_file = base_path
                 .join(HISTORY_DIR)
                 .join(format!("{}.json", selected.timestamp))
-                .into_string()
-            {
-                match fs::read_to_string(&snapshot_file) {
-                    Ok(content) => match serde_json::from_str::<TodoList>(&content) {
-                        Ok(mut snapshot) => {
-                            let original_config = snapshot.config.clone();
-                            snapshot.config.show_completed_range = None;
-                            if let Some(hide_completed_groups) = hide_completed_groups {
-                                snapshot.config.hide_completed_groups = hide_completed_groups;
-                            }
-                            let lines = if show_changes {
-                                match &selected.action {
-                                    TodoAction::Add(added) => snapshot.print_highlight(
-                                        &[added.timestamp],
-                                        Some(Color::Yellow),
-                                        Some(Attributes::default().with(Attribute::Bold)),
-                                    ),
-                                    TodoAction::Complete(completed, uncompleted) => {
-                                        completed.clone().append(&mut uncompleted.clone());
-                                        snapshot.print_highlight(
-                                            &completed
-                                                .iter()
-                                                .map(|item| item.timestamp)
-                                                .collect::<Vec<_>>(),
-                                            Some(Color::Yellow),
-                                            Some(Attributes::default().with(Attribute::Bold)),
-                                        )
-                                    }
-                                    TodoAction::Remove(removed) => {
-                                        for item in removed {
-                                            snapshot.items.push(item.clone());
-                                        }
-                                        snapshot.sort();
-                                        snapshot.print_highlight(
-                                            &removed
-                                                .iter()
-                                                .map(|item| item.timestamp)
-                                                .collect::<Vec<_>>(),
-                                            Some(Color::Red),
-                                            Some(
-                                                Attributes::default()
-                                                    .with(Attribute::Bold)
-                                                    .with(Attribute::CrossedOut),
-                                            ),
-                                        )
-                                    }
-                                    TodoAction::EditBulk {
-                                        edited,
-                                        old_tag: _,
-                                        new_tag: _,
-                                    } => snapshot.print_highlight(
-                                        &edited
+                .into_os_string();
+            match fs::read_to_string(&snapshot_file) {
+                Ok(content) => match serde_json::from_str::<TodoList>(&content) {
+                    Ok(mut snapshot) => {
+                        let original_config = snapshot.config.clone();
+                        snapshot.config.show_completed_range = None;
+                        if let Some(hide_completed_groups) = hide_completed_groups {
+                            snapshot.config.hide_completed_groups = hide_completed_groups;
+                        }
+                        let lines = if show_changes {
+                            match &selected.action {
+                                TodoAction::Add(added) => snapshot.print_highlight(
+                                    &[added.timestamp],
+                                    Some(Color::Yellow),
+                                    Some(Attributes::default().with(Attribute::Bold)),
+                                ),
+                                TodoAction::Complete(completed, uncompleted) => {
+                                    completed.clone().append(&mut uncompleted.clone());
+                                    snapshot.print_highlight(
+                                        &completed
                                             .iter()
                                             .map(|item| item.timestamp)
                                             .collect::<Vec<_>>(),
                                         Some(Color::Yellow),
                                         Some(Attributes::default().with(Attribute::Bold)),
-                                    ),
-                                    TodoAction::EditSingular {
-                                        edited,
-                                        old_desc: _,
-                                        new_desc: _,
-                                        old_detail: _,
-                                        new_detail: _,
-                                        old_tag: _,
-                                        new_tag: _,
-                                    } => snapshot.print_highlight(
-                                        &[edited.timestamp],
-                                        Some(Color::Yellow),
-                                        Some(Attributes::default().with(Attribute::Bold)),
-                                    ),
-                                    TodoAction::Config { old: _, new: _ }
-                                    | TodoAction::Revert(_) => snapshot.print(),
+                                    )
                                 }
+                                TodoAction::Remove(removed) => {
+                                    for item in removed {
+                                        snapshot.items.push(item.clone());
+                                    }
+                                    snapshot.sort();
+                                    snapshot.print_highlight(
+                                        &removed
+                                            .iter()
+                                            .map(|item| item.timestamp)
+                                            .collect::<Vec<_>>(),
+                                        Some(Color::Red),
+                                        Some(
+                                            Attributes::default()
+                                                .with(Attribute::Bold)
+                                                .with(Attribute::CrossedOut),
+                                        ),
+                                    )
+                                }
+                                TodoAction::EditBulk {
+                                    edited,
+                                    old_tag: _,
+                                    new_tag: _,
+                                } => snapshot.print_highlight(
+                                    &edited.iter().map(|item| item.timestamp).collect::<Vec<_>>(),
+                                    Some(Color::Yellow),
+                                    Some(Attributes::default().with(Attribute::Bold)),
+                                ),
+                                TodoAction::EditSingular {
+                                    edited,
+                                    old_desc: _,
+                                    new_desc: _,
+                                    old_detail: _,
+                                    new_detail: _,
+                                    old_tag: _,
+                                    new_tag: _,
+                                } => snapshot.print_highlight(
+                                    &[edited.timestamp],
+                                    Some(Color::Yellow),
+                                    Some(Attributes::default().with(Attribute::Bold)),
+                                ),
+                                TodoAction::Config { old: _, new: _ } | TodoAction::Revert(_) => {
+                                    snapshot.print()
+                                }
+                            }
+                        } else {
+                            snapshot.print()
+                        };
+                        let mut option_select =
+                            Select::<String>::new("Revert to this version?", |i| i.clone())
+                                .with_initial_position(initial_option_selected);
+                        let mut options = vec![
+                            "Revert to this version".to_string(),
+                            if snapshot.config.hide_completed_groups {
+                                "Show completed groups".to_string()
                             } else {
-                                snapshot.print()
-                            };
-                            let mut option_select =
-                                Select::<String>::new("Revert to this version?", |i| i.clone())
-                                    .with_initial_position(initial_option_selected);
-                            let mut options = vec![
-                                "Revert to this version".to_string(),
-                                if snapshot.config.hide_completed_groups {
-                                    "Show completed groups".to_string()
-                                } else {
-                                    "Hide completed groups".to_string()
-                                },
-                                if show_changes {
-                                    "Hide changes".to_string()
-                                } else {
-                                    "Show changes".to_string()
-                                },
-                            ];
-                            option_select.add_items(&mut options, None);
+                                "Hide completed groups".to_string()
+                            },
+                            if show_changes {
+                                "Hide changes".to_string()
+                            } else {
+                                "Show changes".to_string()
+                            },
+                        ];
+                        option_select.add_items(&mut options, None);
 
-                            match option_select.prompt() {
-                                Ok(result) => match result.index() {
-                                    0 => {
-                                        if initial_journal_selected == 0 {
-                                            break;
-                                        }
-                                        snapshot.config = original_config;
-                                        let current_path = todo_list.path;
-                                        todo_list = snapshot;
-                                        todo_list.path = current_path;
-                                        todo_list
-                                            .save(TodoAction::Revert(selected.timestamp))
-                                            .map_err(|err| handle_save_error(err))?;
+                        match option_select.prompt() {
+                            Ok(result) => match result.index() {
+                                0 => {
+                                    if initial_journal_selected == 0 {
+                                        break;
                                     }
-                                    1 => {
-                                        initial_option_selected = 1;
-                                        auto_select_journal = Some(initial_journal_selected);
-                                        hide_completed_groups =
-                                            Some(!snapshot.config.hide_completed_groups);
-                                        clean_lines((lines + 1) as u16);
-                                        continue;
-                                    }
-                                    2 => {
-                                        initial_option_selected = 2;
-                                        auto_select_journal = Some(initial_journal_selected);
-                                        show_changes = !show_changes;
-                                        clean_lines((lines + 1) as u16);
-                                        continue;
-                                    }
-                                    _ => break,
-                                },
-                                _ => {
-                                    initial_option_selected = 0;
+                                    snapshot.config = original_config;
+                                    let current_path = todo_list.path;
+                                    todo_list = snapshot;
+                                    todo_list.path = current_path;
+                                    todo_list
+                                        .save(TodoAction::Revert(selected.timestamp))
+                                        .map_err(|err| handle_save_error(err))?;
+                                }
+                                1 => {
+                                    initial_option_selected = 1;
+                                    auto_select_journal = Some(initial_journal_selected);
+                                    hide_completed_groups =
+                                        Some(!snapshot.config.hide_completed_groups);
                                     clean_lines((lines + 1) as u16);
                                     continue;
                                 }
+                                2 => {
+                                    initial_option_selected = 2;
+                                    auto_select_journal = Some(initial_journal_selected);
+                                    show_changes = !show_changes;
+                                    clean_lines((lines + 1) as u16);
+                                    continue;
+                                }
+                                _ => break,
+                            },
+                            _ => {
+                                initial_option_selected = 0;
+                                clean_lines((lines + 1) as u16);
+                                continue;
                             }
-                            break;
                         }
-                        Err(e) => {
-                            clean_line();
-                            eprintln!(
-                                "\n  Failed to read snapshot {}. {}\n",
-                                selected.timestamp,
-                                e.to_string()
-                            );
-                            continue;
-                        }
-                    },
+                        break;
+                    }
                     Err(e) => {
                         clean_line();
                         eprintln!(
-                            "\n  Failed to fetch snapshot {}. {}\n",
+                            "\n  Failed to read snapshot {}. {}\n",
                             selected.timestamp,
                             e.to_string()
                         );
                         continue;
                     }
+                },
+                Err(e) => {
+                    clean_line();
+                    eprintln!(
+                        "\n  Failed to fetch snapshot {}. {}\n",
+                        selected.timestamp,
+                        e.to_string()
+                    );
+                    continue;
                 }
-            } else {
-                clean_line();
-                continue;
             }
         }
     }
