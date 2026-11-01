@@ -6,8 +6,10 @@ use std::{
 
 use crate::todo::{
     help_texts::{
-        COMPLETE_HELP, CONFIG_HELP, DETAIL_HELP, EDIT_HELP, FILTER_HELP, GENERAL_HELP, JOURNAL_HELP, LIST_HELP, NEW_HELP, REMOVE_HELP,
-    }, models::{Command, TodoFindError, TodoList},
+        COMPLETE_HELP, CONFIG_HELP, DETAIL_HELP, EDIT_HELP, FILTER_HELP, GENERAL_HELP,
+        JOURNAL_HELP, LIST_HELP, NEW_HELP, REMOVE_HELP,
+    },
+    models::{Command, TodoFindError, TodoList},
 };
 
 pub const DIR: &'static str = ".todo";
@@ -50,8 +52,10 @@ pub fn print_help(cmd: Option<String>) {
             "help" | "-h" | "--help" => text = GENERAL_HELP,
             "journal" | "log" => text = JOURNAL_HELP,
             _ => {
-                eprintln!("\n  Error: No such command `{cmd}`\n  Try --help to see the available commands\n");
-                return
+                eprintln!(
+                    "\n  Error: No such command `{cmd}`\n  Try --help to see the available commands\n"
+                );
+                return;
             }
         }
     }
@@ -99,17 +103,17 @@ pub fn get_command(args: Vec<String>) -> Command {
             let mut detail = false;
             let mut time = false;
             let mut pending = false;
-            if arg == "list"
-                && let Some(next_arg) = args.next()
-            {
-                arg = next_arg;
-            } else {
-                return Command::List {
-                    all: false,
-                    detail: false,
-                    time: false,
-                    pending: false,
-                };
+            if arg == "list" {
+                if let Some(next_arg) = args.next() {
+                    arg = next_arg;
+                } else {
+                    return Command::List {
+                        all: false,
+                        detail: false,
+                        time: false,
+                        pending: false,
+                    };
+                }
             }
             loop {
                 match arg.as_str() {
