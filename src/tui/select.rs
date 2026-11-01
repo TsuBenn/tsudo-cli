@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     io::{Write, stdout},
     ops::Range,
 };
@@ -12,8 +12,8 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     style::{
         Attribute::{self},
-        Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetBackgroundColor,
-        SetForegroundColor, Stylize,
+        Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetForegroundColor,
+        Stylize,
     },
     terminal::{self, ScrollUp},
 };
@@ -211,9 +211,9 @@ impl<'a, T> Select<'a, T> {
         }
     }
 
-    fn match_item(&self, item: &T, query: &str) -> (bool, Option<Vec<Range<usize>>>) {
+    fn match_item(&self, item: &T, query: &str) -> bool {
         let item = (self.formatter)(item);
-        if let Some((fzf, mut indices)) = SkimMatcherV2::default()
+        if let Some(fzf) = SkimMatcherV2::default()
             .score_config(SkimScoreConfig {
                 score_match: 16,
                 gap_start: -3,
@@ -225,39 +225,17 @@ impl<'a, T> Select<'a, T> {
                 bonus_consecutive: 4,
                 penalty_case_mismatch: -2,
             })
-            .fuzzy_indices(&item, &query)
+            .fuzzy_match(&item, &query)
         {
-            let mut ranges = Vec::new();
-            indices.sort_unstable();
-            if !indices.is_empty() {
-                let mut start = indices[0];
-                let mut prev = start;
-
-                for &idx in indices.iter().skip(1) {
-                    if idx == prev + 1 {
-                        prev = idx
-                    } else {
-                        ranges.push(start..(prev + 1));
-                        start = idx;
-                        prev = idx;
-                    }
-                }
-
-                ranges.push(start..(prev + 1));
-            }
             if fzf >= 10 {
-                return (true, Some(ranges));
+                return true;
             }
         }
 
-        (false, None)
+        false
     }
 
-    fn match_filter(
-        &self,
-        item: &SelectItem<&'a mut T>,
-        filter: &str,
-    ) -> (bool, Option<Vec<Range<usize>>>) {
+    fn match_filter(&self, item: &SelectItem<&'a mut T>, filter: &str) -> bool {
         match &item.group {
             Some(group) if filter.starts_with("%") => {
                 let stripped_filter = filter.strip_prefix("%").unwrap();
@@ -272,14 +250,14 @@ impl<'a, T> Select<'a, T> {
                     .contains(&group_filter.to_lowercase().replace(" ", ""))
                 {
                     if item_filter.is_empty() {
-                        return (true, None);
+                        return true;
                     }
                     return self.match_item(&item.data, &item_filter.to_lowercase());
                 }
             }
             _ => return self.match_item(&item.data, &filter.to_lowercase()),
         }
-        (false, None)
+        false
     }
 
     fn calculate_page_ranges(
@@ -345,6 +323,39 @@ impl<'a, T> Select<'a, T> {
         filtered_items
     }
 
+    fn sort_items(&self, items: &mut Vec<usize>, sorter: fn(&T, &T) -> Ordering) {
+        let mut group_tags = items
+            .chunk_by(|a, b| self.items[*a].group == self.items[*b].group)
+            .map(|i| i.to_vec())
+            .collect::<Vec<_>>();
+        for group in group_tags.iter_mut() {
+            group.sort_by(|a, b| sorter(self.items[*a].data, self.items[*b].data));
+        }
+        *items = group_tags.concat()
+    }
+
+    fn filter_items(&self, filtered_items: &[usize], filter: &str) -> Vec<usize> {
+        let mut result = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, item)| {
+                let match_filter = self.match_filter(item, &filter);
+                if (filtered_items.contains(&i) && filter.is_empty()) || (!filter.is_empty() && match_filter) {
+                    Some(i)
+                } else {
+                    None
+                }
+                })
+            .collect();
+
+        if let Some(sorter) = self.sorter {
+            self.sort_items(&mut result, sorter);
+        }
+
+        result
+    }
+
     pub fn prompt(mut self) -> Result<SelectResult<'a, T>, UIError> {
         let mut stdout = stdout();
         let mut filter = self.initial_filter.clone();
@@ -355,41 +366,9 @@ impl<'a, T> Select<'a, T> {
         let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
         let mut direction = 0;
 
-        if let Some(sorter) = self.sorter {
-            let mut indexed_items: Vec<_> = self.items.into_iter().enumerate().collect();
-            indexed_items.sort_by(|(_, a), (_, b)| sorter(a.data, b.data));
-            let mut old_to_new = vec![0; indexed_items.len()];
-            self.items = indexed_items
-                .into_iter()
-                .enumerate()
-                .map(|(new, (old, item))| {
-                    old_to_new[old] = new;
-                    item
-                })
-                .collect();
-            for idx in &mut self.initial_selections {
-                *idx = old_to_new[*idx];
-            }
-        }
-
         let filtered_items = self.get_filtered_items();
 
-        let mut match_indices = HashMap::new();
-
-        let mut items = self
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(i, item)| {
-                let (match_filter, indices) = self.match_filter(item, &filter);
-                if filtered_items.contains(&i) || (!filter.is_empty() && match_filter) {
-                    match_indices.insert(i, indices);
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut items = self.filter_items(&filtered_items, &filter);
 
         self.calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
 
@@ -435,22 +414,8 @@ impl<'a, T> Select<'a, T> {
                 selected_indices.insert(auto_select);
                 break;
             }
-            items = self
-                .items
-                .iter()
-                .enumerate()
-                .filter_map(|(i, item)| {
-                    let (match_filter, indices) = self.match_filter(item, &filter);
-                    if (filtered_items.contains(&i) || !filter.is_empty())
-                        && (filter.is_empty() || match_filter)
-                    {
-                        match_indices.insert(i, indices);
-                        Some(i)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+
+            items = self.filter_items(&filtered_items, &filter);
 
             self.calculate_page_ranges(&self.page_size, &items, &mut page_ranges);
 
@@ -492,7 +457,8 @@ impl<'a, T> Select<'a, T> {
                 continue;
             }
 
-            let selected_item_index = items[page_ranges[page_index].clone()][selected_index as usize];
+            let selected_item_index =
+                *items.get(page_ranges.get(page_index).unwrap_or(&(0..0)).clone()).unwrap_or(&[]).get(selected_index as usize).unwrap_or(&0);
 
             direction = 0;
 
@@ -689,26 +655,6 @@ impl<'a, T> Select<'a, T> {
                     ResetColor,
                 )
                 .map_err(|e| UIError::Other(e.to_string()))?;
-                if filter_mode && !filter.is_empty() {
-                    if let Some(Some(ranges)) = match_indices.get(&item_i) {
-                        let (x, _) =
-                            cursor::position().map_err(|e| UIError::Terminal(e.to_string()))?;
-                        let x = x - item_string.len() as u16;
-                        for range in ranges {
-                            crossterm::queue!(
-                                stdout,
-                                MoveToColumn(x + range.start as u16),
-                                SetAttribute(Attribute::Bold),
-                                SetForegroundColor(Color::Black),
-                                SetBackgroundColor(Color::DarkCyan),
-                                Print(&item_string[range.start..range.end]),
-                                SetAttribute(Attribute::Reset),
-                                ResetColor,
-                            )
-                            .map_err(|e| UIError::Other(e.to_string()))?;
-                        }
-                    }
-                }
             }
 
             crossterm::queue!(
@@ -839,7 +785,7 @@ impl<'a, T> Select<'a, T> {
                                                 selected_indices.insert(ii);
                                             }
                                         }
-                                        continue
+                                        continue;
                                     }
                                     selected_indices.insert(*i);
                                 }
@@ -853,7 +799,7 @@ impl<'a, T> Select<'a, T> {
                                                 selected_indices.remove(&ii);
                                             }
                                         }
-                                        continue
+                                        continue;
                                     }
                                     selected_indices.remove(i);
                                 }

@@ -57,6 +57,7 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
         let mut auto_select_journal = None;
         let mut hide_completed_groups = None;
         let mut show_changes = true;
+        let mut sort_by_completion = None;
         let mut initial_option_selected = 0;
 
         loop {
@@ -190,6 +191,9 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                         if let Some(hide_completed_groups) = hide_completed_groups {
                             snapshot.config.hide_completed_groups = hide_completed_groups;
                         }
+                        if let Some(sort_by_completion) = sort_by_completion {
+                            snapshot.config.sort_by_completion = sort_by_completion;
+                        }
                         let lines = if show_changes {
                             match &selected.action {
                                 TodoAction::Add(added) => snapshot.print_highlight(
@@ -270,6 +274,11 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                             } else {
                                 "Show changes".to_string()
                             },
+                            if snapshot.config.sort_by_completion {
+                                "Stop sorting by Completion".to_string()
+                            } else {
+                                "Sort by Completion".to_string()
+                            },
                         ];
                         option_select.add_items(&mut options, None);
 
@@ -299,6 +308,13 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                                     initial_option_selected = 2;
                                     auto_select_journal = Some(initial_journal_selected);
                                     show_changes = !show_changes;
+                                    clean_lines((lines + 1) as u16);
+                                    continue;
+                                }
+                                3 => {
+                                    initial_option_selected = 3;
+                                    auto_select_journal = Some(initial_journal_selected);
+                                    sort_by_completion = Some(!snapshot.config.sort_by_completion);
                                     clean_lines((lines + 1) as u16);
                                     continue;
                                 }

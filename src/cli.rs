@@ -9,9 +9,9 @@ mod config;
 mod detail;
 mod journal;
 
-const PAGE_SIZE: usize = 30;
+const PAGE_SIZE: usize = 18;
 const DONE_PREFIX: &'static str = "✓";
-const PENDING_PREFIX: &'static str = " ";
+const PENDING_PREFIX: &'static str = "-";
 
 pub use list::todo_list as list;
 pub use new::todo_new as new;

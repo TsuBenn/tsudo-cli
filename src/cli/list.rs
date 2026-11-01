@@ -15,7 +15,9 @@ pub fn todo_list(todo_list: Result<TodoList, TodoFindError>, all: bool, detail: 
         if pending {
             todo_list.config.show_completed_range = Some(0)
         }
-        todo_list.items.sort_by_key(|i| i.done);
+        if todo_list.config.sort_by_completion {
+            todo_list.sort_by_completion();
+        }
         todo_list.print();
     }
 }

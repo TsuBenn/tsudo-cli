@@ -1,15 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, time::{SystemTime, UNIX_EPOCH}};
 
-use crate::todo::DIR;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TodoJournal {
     pub action: TodoAction,
     pub timestamp: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TodoListConfig {
     pub show_date: bool,
     pub show_progress: bool,
@@ -50,10 +48,6 @@ pub struct TodoList {
     pub items: Vec<TodoItem>,
     pub path: OsString,
     pub config: TodoListConfig,
-}
-
-fn default_path() -> OsString {
-    DIR.to_string().into()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,6 +102,6 @@ pub enum Command {
     Edit,
     Journal,
     Config,
-    Help,
+    Help(Option<String>),
     Unknown(String),
 }

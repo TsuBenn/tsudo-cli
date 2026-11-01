@@ -20,7 +20,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) -> Result<
         Command::Remove => cli::remove(todo_list),
         Command::Config => cli::config(todo_list),
         Command::Detail => cli::detail(todo_list),
-        Command::Help => Ok(todo::print_help()),
+        Command::Help(command) => Ok(todo::print_help(command)),
         Command::Unknown(cmd) => {
             eprintln!(
                 "\n  Error: No such command `{cmd}`\n  Try --help to see the available commands\n",

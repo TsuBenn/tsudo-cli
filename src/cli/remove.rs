@@ -52,8 +52,7 @@ pub fn todo_remove(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32
                 item.timestamp
             })
             .collect();
-        let mut todo_list_clone = todo_list.clone();
-        todo_list_clone.items.sort_by_key(|i| i.done);
+        let todo_list_clone = todo_list.clone();
         todo_list.remove(&mut to_remove);
         todo_list.save(TodoAction::Remove(remove_item)).map_err(|err| handle_save_error(err))?;
         todo_list_clone.print_highlight(

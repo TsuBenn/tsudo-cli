@@ -329,6 +329,7 @@ impl<'a> Text<'a> {
                     None => suggestions.len(),
                 };
                 if selected_suggestion >= (selection_scroll + height) as i64 {
+                    selected_suggestion = (selection_scroll + height - 1) as i64;
                     match max_height {
                         Some(max_height)
                             if selected_suggestion >= (selection_scroll + max_height) as i64 =>

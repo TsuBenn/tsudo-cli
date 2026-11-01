@@ -40,12 +40,14 @@ impl TodoList {
         }
     }
     pub fn get_tags(&self) -> Vec<String> {
-        self.items
+        let mut tags = self.items
             .iter()
             .map(|item| item.tag.clone())
             .collect::<HashSet<_>>()
             .into_iter()
-            .collect()
+            .collect::<Vec<_>>();
+        tags.sort_by(|b, a| self.items.iter().filter(|i| i.tag == *a).max_by_key(|i| i.timestamp).unwrap().timestamp.cmp(&self.items.iter().filter(|i| i.tag == *b).max_by_key(|i| i.timestamp).unwrap().timestamp));
+        tags
     }
     pub fn get_completed_tags(&self) -> Vec<String> {
         let mut completed_tags = Vec::new();
@@ -111,8 +113,19 @@ impl TodoList {
         }
         Ok(())
     }
+    pub fn sort_by_completion(&mut self) {
+        self.sort();
+        let mut group_tags = self.items.chunk_by(|a, b| a.tag == b.tag).map(|chunk| chunk.to_vec()).collect::<Vec<_>>();
+        for group in group_tags.iter_mut() {
+            group.sort_by(|a, b| a.done.cmp(&b.done));
+        }
+        self.items = group_tags.concat()
+    }
     pub fn sort(&mut self) {
-        self.items.sort_by(|a, b| b.tag.cmp(&a.tag));
+        self.items.sort_by(|a, b| a.tag.cmp(&b.tag));
+        let mut group_tags = self.items.chunk_by(|a, b| a.tag == b.tag).map(|chunk| chunk.to_vec()).collect::<Vec<_>>();
+        group_tags.sort_by(|a, b| b.iter().max_by_key(|i| i.timestamp).unwrap().timestamp.cmp(&a.iter().max_by_key(|i| i.timestamp).unwrap().timestamp));
+        self.items = group_tags.concat()
     }
     pub fn print(&self) -> usize {
         self.print_highlight(&[], None, None)
@@ -123,13 +136,17 @@ impl TodoList {
         color: Option<Color>,
         attributes: Option<Attributes>,
     ) -> usize {
+        let mut this = self.clone();
+        if self.config.sort_by_completion {
+            this.sort_by_completion();
+        }
         let mut lines = 1;
         println!();
-        if self.items.is_empty() {
+        if this.items.is_empty() {
             println!("Todo list empty!");
             return 0;
         }
-        for chunk in self.items.chunk_by(|a, b| a.tag == b.tag) {
+        for chunk in this.items.chunk_by(|a, b| a.tag == b.tag) {
             let tag = &chunk[0].tag;
             let done_count = chunk.iter().filter(|i| i.done).count();
             let pct_string = format!(

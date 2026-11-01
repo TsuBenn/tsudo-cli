@@ -86,11 +86,17 @@ pub fn todo_config(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32
                 Err(err) => return Err(handle_ui_error(err, "Config has been left unchanged!")),
             }
         }
-        todo_list.save(TodoAction::Config {
-            old: old_config,
-            new: todo_list.config.clone(),
-        }).map_err(|err| handle_save_error(err))?;
-        eprintln!("\n  Config saved!\n")
+        if old_config != todo_list.config {
+            todo_list
+                .save(TodoAction::Config {
+                    old: old_config,
+                    new: todo_list.config.clone(),
+                })
+                .map_err(|err| handle_save_error(err))?;
+            eprintln!("\n  Config saved!\n")
+        } else {
+            eprintln!("\n  Config unchanged!\n")
+        }
     }
 
     Ok(())

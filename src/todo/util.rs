@@ -4,7 +4,11 @@ use std::{
     fs::{self},
 };
 
-use crate::todo::models::{TodoFindError, TodoList, Command};
+use crate::todo::{
+    help_texts::{
+        COMPLETE_HELP, CONFIG_HELP, DETAIL_HELP, EDIT_HELP, FILTER_HELP, GENERAL_HELP, JOURNAL_HELP, LIST_HELP, NEW_HELP, REMOVE_HELP,
+    }, models::{Command, TodoFindError, TodoList},
+};
 
 pub const DIR: &'static str = ".todo";
 pub const HISTORY_DIR: &'static str = "history";
@@ -31,75 +35,27 @@ pub fn get_time_format(timestamp: u64) -> String {
     }
 }
 
-pub fn print_help() {
-    let help_text = r#"
-todo - Lightweight, Quick, Project-Scoped Task Management
-
-USAGE:
-    todo [COMMAND]... [ARGS]...
-
-CORE:
-    todo
-        <none>
-            List all Tasks, following the project's config
-
-        -a, --all
-            List all Tasks, even hidden ones
-            This will override the config behavior
-
-        -d, --detail
-            List all Tasks, including their details
-
-        -t, --time
-            List all Tasks, including their creation time or
-            completion time
-            This will override the config behavior
-
-        -p, --pending
-            List only pending Tasks
-            This will override the -a behavior
-
-    todo add/new <desc>
-            Add a new Tasks with the provided description
-            If description is not provided, todo will prompt
-            the user to type in one.
-            The user will also be prompted to give the task a
-            tag, but it can be left blank.
-
-INTERACTIVE:
-    todo complete
-            Toggles Tasks completion status
-
-    todo remove
-            Select a Task or multiple Tasks for removal
-
-    todo edit
-            Select a Task or multiple Tasks for editing
-            Tags can be editted in bulk, while description and
-            detail can only be editted individually
-
-    todo detail
-            Select a Task or multiple Tasks and how their details
-            Details include Description, Tag, Creation Time,
-            Completion Time and Detail
-
-PROJECT:
-    todo config
-            Edit the default behavior of 'todo'
-            Config includes:
-                Show Creation/Completion Time of tasks
-                Show Progress Tasks Groups (Grouped by Tags)
-                Show Completed Tasks within a Range (hour)
-                Hide Completed Task Groups
-                Sort Tasks by Completion
-
-EXAMPLES:
-    todo new Buy some milk
-    todo -p -t -a
-    todo complete
-"#;
-
-    println!("{}", help_text);
+pub fn print_help(cmd: Option<String>) {
+    let mut text = GENERAL_HELP;
+    if let Some(cmd) = cmd {
+        match cmd.as_str() {
+            "list" => text = LIST_HELP,
+            "add" | "new" => text = NEW_HELP,
+            "config" => text = CONFIG_HELP,
+            "complete" | "done" => text = COMPLETE_HELP,
+            "edit" => text = EDIT_HELP,
+            "remove" | "delete" | "rm" => text = REMOVE_HELP,
+            "filter" => text = FILTER_HELP,
+            "detail" => text = DETAIL_HELP,
+            "help" | "-h" | "--help" => text = GENERAL_HELP,
+            "journal" | "log" => text = JOURNAL_HELP,
+            _ => {
+                eprintln!("\n  Error: No such command `{cmd}`\n  Try --help to see the available commands\n");
+                return
+            }
+        }
+    }
+    println!("{}", text);
 }
 
 pub fn get_command(args: Vec<String>) -> Command {
@@ -135,14 +91,26 @@ pub fn get_command(args: Vec<String>) -> Command {
             return Command::Filter(query.join(" "));
         }
         "detail" => return Command::Detail,
-        "help" | "-h" | "--help" => return Command::Help,
-        "journal" | "-j" => return Command::Journal,
+        "help" | "-h" | "--help" => return Command::Help(args.next()),
+        "journal" | "log" => return Command::Journal,
         arg => {
             let mut arg = arg.to_owned();
             let mut all = false;
             let mut detail = false;
             let mut time = false;
             let mut pending = false;
+            if arg == "list"
+                && let Some(next_arg) = args.next()
+            {
+                arg = next_arg;
+            } else {
+                return Command::List {
+                    all: false,
+                    detail: false,
+                    time: false,
+                    pending: false,
+                };
+            }
             loop {
                 match arg.as_str() {
                     "--all" | "-a" => all = true,
@@ -183,9 +151,7 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                         }
                         Err(e) => {
                             eprintln!("\n  {e}\n");
-                            return Err(TodoFindError::Invalid(
-                                file_path.into_os_string(),
-                            ));
+                            return Err(TodoFindError::Invalid(file_path.into_os_string()));
                         }
                     },
                     Err(e) => return Err(TodoFindError::Other(e.to_string())),

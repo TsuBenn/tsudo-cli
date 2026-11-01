@@ -90,9 +90,11 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                             .prompt()
                         {
                             Ok(new) => {
-                                new_desc = Some(new.clone());
-                                selected.description = new;
-                                edited_item_clone.push(selected.clone());
+                                if old_desc != new {
+                                    new_desc = Some(new.clone());
+                                    selected.description = new;
+                                    edited_item_clone.push(selected.clone());
+                                }
                             }
                             Err(UIError::Canceled) => {
                                 auto_select_task = Some(initial_position);
@@ -116,9 +118,11 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                             .prompt()
                         {
                             Ok(new) => {
-                                new_detail = Some(new.clone());
-                                selected.detail = new;
-                                edited_item_clone.push(selected.clone());
+                                if old_detail != new {
+                                    new_detail = Some(new.clone());
+                                    selected.detail = new;
+                                    edited_item_clone.push(selected.clone());
+                                }
                             }
                             Err(UIError::Canceled) => {
                                 auto_select_task = Some(initial_position);
@@ -148,16 +152,18 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                                     old_tag = selected.tag.clone();
                                     old_detail = selected.detail.clone();
                                 }
-                                if multi_selected {
-                                    for (_, item) in task_result.selected {
-                                        item.tag = new.clone();
-                                        edited_item_clone.push(item.clone());
+                                if old_tag != new {
+                                    if multi_selected {
+                                        for (_, item) in task_result.selected {
+                                            item.tag = new.clone();
+                                            edited_item_clone.push(item.clone());
+                                        }
+                                    } else {
+                                        let selected = task_result.data_mut();
+                                        selected.tag = new.clone();
                                     }
-                                } else {
-                                    let selected = task_result.data_mut();
-                                    selected.tag = new.clone();
+                                    new_tag = Some(new.clone());
                                 }
-                                new_tag = Some(new.clone());
                             }
                             Err(UIError::Canceled) => {
                                 auto_select_task = Some(initial_position);
@@ -179,9 +185,10 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                 }
                 Err(err) => return Err(handle_ui_error(err, "No Tasks has been edited!")),
             }
-            todo_list.sort();
-            todo_list
-                .save(if multi_selected {
+            let changed = new_tag.is_some() || new_detail.is_some() || new_desc.is_some();
+            if changed {
+                todo_list.sort();
+                let action = if multi_selected {
                     TodoAction::EditBulk {
                         edited: edited_item_clone,
                         old_tag,
@@ -197,9 +204,11 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                         old_tag,
                         new_tag,
                     }
-                })
-                .map_err(|err| handle_save_error(err))?;
-            todo_list.items.sort_by_key(|i| i.done);
+                };
+                todo_list
+                    .save(action)
+                    .map_err(|err| handle_save_error(err))?;
+            }
             todo_list.print_highlight(
                 &edited_item,
                 Some(Color::Yellow),

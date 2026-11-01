@@ -3,7 +3,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crossterm::style::{Attribute, Attributes, Color};
 use tsudo::tui::*;
 
-use crate::{cli::{PAGE_SIZE, util::*}, todo::*};
+use crate::{
+    cli::{PAGE_SIZE, util::*},
+    todo::*,
+};
 
 pub fn todo_complete(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> {
     if let Ok(mut todo_list) = todo_list {
@@ -86,9 +89,13 @@ pub fn todo_complete(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i
         for (_, item) in result.unselected {
             item.done = false
         }
-        todo_list.save(TodoAction::Complete(completed_item, uncompleted_item)).map_err(|err| handle_save_error(err))?;
 
-        todo_list.items.sort_by_key(|i| i.done);
+        if !completed_item.is_empty() || !uncompleted_item.is_empty() {
+            todo_list
+                .save(TodoAction::Complete(completed_item, uncompleted_item))
+                .map_err(|err| handle_save_error(err))?;
+        }
+
         todo_list.print_highlight(
             &changed_timestamps,
             Some(Color::Yellow),
