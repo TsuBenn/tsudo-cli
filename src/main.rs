@@ -37,7 +37,7 @@ fn main() {
         Err(err) => {
             match &err {
                 TodoFindError::NotFound => {
-                    eprintln!("\n  .todo not found!\n");
+                    eprintln!("\n  Not .todo found in the current directory (or any parent directory)!\n");
                 }
                 TodoFindError::Invalid(_) => {
                     eprintln!("\n  .todo found, but it is invalid or corrupted!\n");
