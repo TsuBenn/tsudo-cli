@@ -865,6 +865,7 @@ impl<'a, T> Select<'a, T> {
                                     page_index = 0;
                                 }
                             } else if c == '/' && self.filter_input {
+                                save_state = None;
                                 filter_mode = true;
                             }
                             continue;
@@ -882,7 +883,6 @@ impl<'a, T> Select<'a, T> {
                         if !filter_mode {
                             continue;
                         }
-                        filter_mode = true;
                         Text::delete_front(&mut filter_cursor, &mut filter, &key_event);
                     }
                     KeyCode::Left => {

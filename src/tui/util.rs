@@ -63,7 +63,7 @@ pub fn render_prompt(
         _ => String::new(),
     };
     let prompt = format!("{} {}{}: ", "?".to_string().green(), &message, &hint);
-    crossterm::execute!(
+    crossterm::queue!(
         stdout,
         MoveToColumn(0),
         Clear(terminal::ClearType::FromCursorDown),
