@@ -63,6 +63,8 @@ When no options are provided, `tsudo` list will behave according to the current 
 
 Multiple options can be used, with the exception that `-p` will override the `-a` behavior.
 
+#### Demonstration
+
 <details>
   <summary>Listing tasks demonstrations</summary>
   <h4>Basic listing</h4>
@@ -97,6 +99,13 @@ tsudo add Buy milk and never come back
 # Is the same as
 tsudo add "Buy milk and never come back"
 ```
+#### Demonstration
+
+<details>
+  <summary>Adding tasks demonstrations</summary>
+  <h4>Basic adding</h4>
+  <img src="assets/adding.gif" alt="Basic adding">
+</details>
 
 ---
 ### Completing tasks
@@ -109,6 +118,14 @@ tsudo done
 - After accepting the completion status, `tsudo` will print out the whole list, and highlight tasks that have their completion status changed.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
+
+#### Demonstration
+
+<details>
+  <summary>Completing tasks demonstrations</summary>
+  <h4>Basic completion</h4>
+  <img src="assets/completing.gif" alt="Basic completion">
+</details>
 
 ---
 ### Removing tasks
@@ -124,6 +141,16 @@ tsudo rm
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
+#### Demonstration
+
+<details>
+  <summary>Removing tasks demonstrations</summary>
+  <h4>Singular removal</h4>
+  <img src="assets/removing.gif" alt="Singular removal">
+  <h4>Multiple removal</h4>
+  <img src="assets/removing_multiple.gif" alt="Multiple removal">
+</details>
+
 ---
 ### Editing tasks
 Edit a task or multiple tasks.
@@ -137,6 +164,16 @@ tsudo edit
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
+#### Demonstration
+
+<details>
+  <summary>Editing tasks demonstrations</summary>
+  <h4>Singular editing</h4>
+  <img src="assets/editing.gif" alt="Singular editing">
+  <h4>Multiple editing</h4>
+  <img src="assets/editing_multiple.gif" alt="Multiple editing">
+</details>
+
 ---
 ### Filtering tasks
 List tasks of a specific tag.
@@ -147,6 +184,18 @@ tsudo filter [query]
 - If a query is provided, `tsudo` will try its best to find the matching tag and list out the tag's tasks. Else if more than one tags are matched, `tsudo` will prompt you to choose which tag you meant to filter.
 - If no tags matches the query whatsoever, the `tsudo` will behave similar to when you don't provide any query at all.
 - After accepting a tag, `tsudo` behaves like [listing](#listing-tasks) but only printing out the tasks of the tag you've chosen.
+
+#### Demonstration
+
+<details>
+  <summary>Filtering tag group demonstrations</summary>
+  <h4>Basic filtering</h4>
+  <img src="assets/filter.gif" alt="Basic filtering">
+  <h4>Filter with query</h4>
+  <img src="assets/filter_query.gif" alt="Filter with query">
+  <h4>Filter with query and matching</h4>
+  <img src="assets/filter_query_match.gif" alt="Filter with query and matching">
+</details>
 
 ---
 ### Tasks details
@@ -159,6 +208,16 @@ tsudo detail
 - `tsudo` lets you choose one or many tasks to show the detail of.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
+
+#### Demonstration
+
+<details>
+  <summary>Listing details of tasks demonstrations</summary>
+  <h4>Singular detail listing</h4>
+  <img src="assets/detail.gif" alt="Singular detail listing">
+  <h4>Multiple detail listing</h4>
+  <img src="assets/detail_multiple.gif" alt="Multiple detail listing">
+</details>
 
 ---
 ### `tsudo` Configuration
@@ -189,6 +248,22 @@ tsudo config
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
+#### Demonstration
+
+<details>
+  <summary>Config demonstrations</summary>
+  <h4>Show Creation/Completion Time of Tasks</h4>
+  <img src="assets/show_time.gif" alt="Show Creation/Completion Time of Tasks">
+  <h4>Show Progress of Task Groups</h4>
+  <img src="assets/show_progress.gif" alt="Show Progress of Task Groups">
+  <h4>Show Completed Task Range</h4>
+  <img src="assets/completion_range.gif" alt="Show Completed Task Range">
+  <h4>Hide Tasks in Fully Completed Group</h4>
+  <img src="assets/hide_completed.gif" alt="Hide Tasks in Fully Completed Group">
+  <h4>Sort Tasks by Completion</h4>
+  <img src="assets/sort_completion.gif" alt="Sort Tasks by Completion">
+</details>
+
 ---
 ### Journaling Changes
 List changes made to the todo list.
@@ -199,6 +274,16 @@ tsudo journal
 - You can decide to whether revert to that version or change the viewing options like hiding completed groups, hiding changes or sorting tasks by completion status, overriding the snapshot's config.
 > **Important:**
 > As of right now, there's no way you can clean up the snapshots and it will eventually take up quite a lot of space if your list is very long and you make a lot of changes. To clean up, you can always delete files within the `.todo/history` directory. Though you might still see all of the version when running `tsudo journal`, that's because `.todo/journal.jsonl` is the one tracking the changes and points `tsudo` to the right `*.json` within `.todo/history` for you to view or revert to. You don't have to change anything in the `.todo/journal.jsonl` if you don't want to as what important are your recent changes and selecing a version that points to nothing won't hurt anyone either.
+
+- For more information on how to navigate the interface, check the [control](#controls) section
+
+#### Demonstration
+
+<details>
+  <summary>Journal demonstrations</summary>
+  <h4>Using Journal to revert Removal</h4>
+  <img src="assets/journal.gif" alt="Using Journal to revert Removal">
+</details>
 
 ---
 ### Controls
@@ -231,12 +316,22 @@ Instead of you entering a task ID for [completing](#completing-tasks), [removing
 - If you have activated the [Hide Tasks in Fully Completed Group](#hide-tasks-in-fully-completed-groups) in the [config](#tsudo_configuration), groups within the task selection interface would colapse the options within the completed groups and will show something like `[-] [8 collapsed items]`.
 - To expand the collapsed groups, you would want to use `space`. By doing so, the filter will be automatically filled with the [Group Filtering](#advanced-filtering) of the selected group and showing only those within that group. You can go back by `esc`, or continue to search within the group by `/` and type.
 - When in *FILTER MODE*, the collapsed groups will be automatically expanded out for searching.
+<details>
+  <summary>Demonstrations</summary>
+  <h4>Collapsed groups behavior</h4>
+  <img src="assets/collapsed_groups.gif" alt="Collapsed groups behavior">
+</details>
 
 #### Filter:
 - `/` to enter *FILTER MODE* and fuzzy find your desired task.
 - `esc` during *FILTER MODE* to cancel the query, clearing the filter and exit *FILTER MODE*.
 - While not in *FILTER MODE* and the query is also not empty, `esc` while clear the filter and does not cancel the prompt.
 - `enter` during the FILTER MODE to accept the query and you can freely move, select or toggle your tasks.
+<details>
+  <summary>Demonstrations</summary>
+  <h4>Basic filtering during seleciton</h4>
+  <img src="assets/select_filter.gif" alt="Basic filtering during seleciton">
+</details>
 
 #### Advanced Filtering:
 - To filter out specific groups, type a `%` at the start of a query telling the search engine to search based on group.
@@ -245,6 +340,11 @@ Example:
 ```
 %Group name - Task description here
 ```
+<details>
+  <summary>Demonstrations</summary>
+  <h4>Filtering groups during selection</h4>
+  <img src="assets/select_filter_group.gif" alt="Filtering groups during selection">
+</details>
 
 ## Support
 As of right now, the only machine that this program works is on my Arch Linux Desktop and I'm using the Ghostty Terminal. I tried using this program on my Phone's Termux and the coloring is rather broken so I'm not guaranteed that every terminal would work as intended. Some terminal might experience flickers as my code sucks and it clears the screen every time it updates the screen to there's that.
