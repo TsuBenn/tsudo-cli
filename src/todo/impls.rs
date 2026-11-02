@@ -95,6 +95,9 @@ impl TodoList {
         let journal = TodoJournal { action, timestamp };
         let journal_content =
             serde_json::to_string(&journal).map_err(|e| TodoListError::SaveError(e.to_string()))?;
+
+        fs::create_dir_all(path).map_err(|e| TodoListError::SaveError(e.to_string()))?;
+        fs::create_dir_all(history).map_err(|e| TodoListError::SaveError(e.to_string()))?;
         let mut journal_file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -102,8 +105,6 @@ impl TodoList {
             .map_err(|e| TodoListError::SaveError(e.to_string()))?;
         writeln!(journal_file, "{}", journal_content)
             .map_err(|e| TodoListError::SaveError(e.to_string()))?;
-        fs::create_dir_all(path).map_err(|e| TodoListError::SaveError(e.to_string()))?;
-        fs::create_dir_all(history).map_err(|e| TodoListError::SaveError(e.to_string()))?;
         fs::write(history_file, content.clone())
             .map_err(|e| TodoListError::SaveError(e.to_string()))?;
         fs::write(file, content).map_err(|e| TodoListError::SaveError(e.to_string()))?;
@@ -125,6 +126,7 @@ impl TodoList {
         self.items.sort_by(|a, b| a.tag.cmp(&b.tag));
         let mut group_tags = self.items.chunk_by(|a, b| a.tag == b.tag).map(|chunk| chunk.to_vec()).collect::<Vec<_>>();
         group_tags.sort_by(|a, b| b.iter().max_by_key(|i| i.timestamp).unwrap().timestamp.cmp(&a.iter().max_by_key(|i| i.timestamp).unwrap().timestamp));
+        group_tags.sort_by(|b, a| a.iter().any(|i| !i.done).cmp(&b.iter().any(|i| !i.done)));
         self.items = group_tags.concat()
     }
     pub fn print(&self) -> usize {
@@ -177,11 +179,7 @@ impl TodoList {
                     ":".to_string()
                 }
             );
-            if tag.is_empty() {
-                println!(" {}", tag_string.bold().italic().dark_cyan().dim());
-            } else {
-                println!(" {}", tag_string.bold().italic().cyan());
-            }
+            println!(" {}", tag_string.bold().italic().cyan());
             lines += 1;
             if self.config.hide_completed_groups && fully_completed && !chunk.iter().any(|s| to_highlight.contains(&s.timestamp)) {
                 continue;

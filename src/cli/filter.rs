@@ -12,6 +12,9 @@ use crate::{
 use tsudo::tui::*;
 
 fn match_tags(tag: &str, query: &str) -> bool {
+    if tag.is_empty() {
+        return false
+    }
     let tag = tag.trim().to_lowercase();
 
     if query == tag {

@@ -1,4 +1,4 @@
-use std::io::stdout;
+use std::io::{Write, stdout};
 
 use crossterm::{
     cursor::{self},
@@ -48,6 +48,8 @@ impl<'a> Confirm<'a> {
                 None,
                 false,
             )?;
+
+            stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
 
             if let Event::Key(key_event) =
                 event::read().map_err(|e| UIError::Terminal(e.to_string()))?

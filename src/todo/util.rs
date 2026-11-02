@@ -153,16 +153,15 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                             todo_list.sort();
                             return Ok(todo_list);
                         }
-                        Err(e) => {
-                            eprintln!("\n  {e}\n");
-                            return Err(TodoFindError::Invalid(file_path.into_os_string()));
+                        Err(_) => {
+                            return Err(TodoFindError::Invalid(dir_path.into_os_string()));
                         }
                     },
                     Err(e) => return Err(TodoFindError::Other(e.to_string())),
                 }
             } else {
                 let mut todo_list = TodoList::new();
-                todo_list.path = file_path.into_os_string();
+                todo_list.path = dir_path.into_os_string();
                 return Ok(todo_list);
             }
         }

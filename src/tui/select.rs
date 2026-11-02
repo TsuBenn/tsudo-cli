@@ -585,7 +585,7 @@ impl<'a, T> Select<'a, T> {
                 let selected = i == selected_index as usize;
                 let item_string = (self.formatter)(&item.data);
                 let toggled = selected_indices.contains(&item_i);
-                let toggled_str = if toggled { "✔" } else { " " };
+                let toggled_str = if toggled { "✓" } else { " " };
                 let color = if item.collapsed && filter.is_empty() {
                     Color::Cyan
                 } else if selected {

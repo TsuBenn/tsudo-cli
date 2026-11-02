@@ -1,4 +1,4 @@
-use std::io::{Stdout, stdout};
+use std::io::{Stdout, Write, stdout};
 
 use crossterm::{
     cursor::{self, MoveToColumn, MoveUp},
@@ -84,6 +84,9 @@ pub fn render_prompt(
 }
 
 pub fn cleanup_terminal(stdout: &mut Stdout, report_cancel: bool) -> Result<(), UIError> {
+
+    stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
+
     crossterm::execute!(
         stdout,
         cursor::Show,

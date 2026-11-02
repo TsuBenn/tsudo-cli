@@ -1,15 +1,15 @@
 # tsudo
 `tsudo` is a light-weight, project-scoped CLI Task Manager built in Rust. The name `tsudo` comes from the combination of my name `TsuBenn` and `todo`.
 
----
+![tsudo demo](assets/demo.gif)
+
 ## Features
 - **Project-scoped**: Each project will have its own `.todo` similar to how `.git` works. Preventing bloating the todo list with other project's tasks.
 - **Inline TUI**: Instead of passing in tasks ID to complete, remove or edit, `tsudo` provide a light-weight terminal UI to filter, select tasks seamlessly.
-- **Only Tags**: Instead of complex groupings and labeling, `tsudo` only have tags, help simple organization and grouping tasks as well as track each group's progress.
+- **Only Tags**: Instead of complex groupings and labeling, `tsudo` only have tags, help simple organizating and grouping tasks as well as track each group's progress.
 - **Compact Listing**: `tsudo` provide some basic features to reduce the amount of tasks shown, prevent distraction from completed task groups.
 - **Journaling**: To prevent mistakes from high-speed productions, `tsudo` snapshot every changes of the todo list so developer can revert to previous versions if they made a destructive mistake.
 
----
 ## Installation
 ### From source
 Require Rust's tool chain `cargo` to be installed
@@ -21,7 +21,6 @@ cargo install --path .
 
 Please read the [support](#support) section for more information on whether this program might be supported on your device.
 
----
 ## Usage
 ### Overview
 `tsudo` keeps its commands short and simple while providing an intuitive interface within some commands to reduce frictions when it comes to task management.
@@ -45,7 +44,7 @@ tsudo [command] [args]...
 ### Listing tasks
 List tasks currently in current project.
 > **Important:**
-> If no `.todo` directory a present in the current directory or any of the parent directory, no tasks will be printed and `tsudo` will throw a message and no `.todo` directory will be created.
+> If no `.todo` directory is present in the current directory or any of the parent directory, no tasks will be printed and `tsudo` will throw a message and no `.todo` directory will be created.
 > To initialize a `.todo` directory, check the usage of [adding tasks](#adding-tasks).
 >
 ```bash
@@ -62,6 +61,22 @@ When no options are provided, `tsudo` list will behave according to the current 
 | `-t`, `--time`    | Show tasks' creation or completion date and time                 |
 | `-p`, `--pending` | Show only pending tasks, this override the `-a`, `-all` behavior |
 
+Multiple options can be used, with the exception that `-p` will override the `-a` behavior.
+
+<details>
+  <summary>Listing tasks demonstrations</summary>
+  #### Basic listing
+  <img src="assets/listing.gif" alt="Basic listing">
+  #### Listing with tag `-a`
+  <img src="assets/listing_all.gif" alt="Listing with options `-a`">
+  #### Listing with tag `-d`
+  <img src="assets/listing_detail.gif" alt="Listing with options `-d`">
+  #### Listing with tag `-t`
+  <img src="assets/listing_time.gif" alt="Listing with options `-t`">
+  #### Listing with tag `-p`
+  <img src="assets/listing_pending.gif" alt="Listing with options `-p`">
+</details>
+
 ---
 ### Adding tasks
 - Add a new tasks with a provided description.
@@ -69,7 +84,7 @@ When no options are provided, `tsudo` list will behave according to the current 
 - After description is provided, `tsudo` will ask for a tag for the task, the inline TUI will suggest existing tags if the list has any. A task's tag can be left blank, though when listed, it would show as `__untagged__:`
 - A task, can also hold detail, which holds a tasks more descriptive details other than the description itself. `new` or `add` by default does not let you add detail on creation to reduce the step of adding a new task, to add detail to a task, check out [editing](#editing-tasks).
 > **Important:**
-> If no `.todo` directory a present in the current directory or any of the parent directory, `tsudo` will ask whether you want to initialize a `.todo` in the current directory.
+> If no `.todo` directory is present in the current directory or any of the parent directory, `tsudo` will ask whether you want to initialize a `.todo` in the current directory.
 >
 ```bash
 tsudo add [args]
@@ -189,7 +204,7 @@ tsudo journal
 ### Controls
 Instead of you entering a task ID for [completing](#completing-tasks), [removing](#removing-tasks) or [editing](#editing-tasks), `tsudo` provide a interactive inline terminal UI for a more intuitive input and selections.
 #### Basics
-- `i/j/k/l` or the `←/↑/→/↓ ` for "up", "down", "previous page" and "next page".
+- `i/j/k/l` or the `arrow keys` for "up", "down", "previous page" and "next page".
 > If you're complaining about me not using `h/j/k/l` then I'm sorry, I find `i/j/k/l` easier to use and my Neovim/Helix config uses this bindings for movement so there's that.
 - `esc` to cancel the prompt, or in some cases, return to previous menu.
 - For `enter` and `space`, they behave differently depends on the mode, but overall, `enter` usually means to accept, and `space` usually means to toggle. Check the next few sections for more information on how `enter` and `space` behave in different modes.
