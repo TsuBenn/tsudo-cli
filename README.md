@@ -65,15 +65,15 @@ Multiple options can be used, with the exception that `-p` will override the `-a
 
 <details>
   <summary>Listing tasks demonstrations</summary>
-  #### Basic listing
+  <h4>Basic listing</h4>
   <img src="assets/listing.gif" alt="Basic listing">
-  #### Listing with tag `-a`
+  <h4>Listing with tag `-a`</h4>
   <img src="assets/listing_all.gif" alt="Listing with options `-a`">
-  #### Listing with tag `-d`
+  <h4>Listing with tag `-d`</h4>
   <img src="assets/listing_detail.gif" alt="Listing with options `-d`">
-  #### Listing with tag `-t`
+  <h4>Listing with tag `-t`</h4>
   <img src="assets/listing_time.gif" alt="Listing with options `-t`">
-  #### Listing with tag `-p`
+  <h4>Listing with tag `-p`</h4>
   <img src="assets/listing_pending.gif" alt="Listing with options `-p`">
 </details>
 
