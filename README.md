@@ -71,9 +71,9 @@ Multiple options can be used, with the exception that `-p` will override the `-a
   <img src="assets/listing.gif" alt="Basic listing">
   <h4>Listing with tag <code>-a</code></h4>
   <img src="assets/listing_all.gif" alt="Listing with options `-a`">
-  <h4>Listing with tag <code>-a</code></h4>
-  <img src="assets/listing_detail.gif" alt="Listing with options `-d`">
   <h4>Listing with tag <code>-d</code></h4>
+  <img src="assets/listing_detail.gif" alt="Listing with options `-d`">
+  <h4>Listing with tag <code>-t</code></h4>
   <img src="assets/listing_time.gif" alt="Listing with options `-t`">
   <h4>Listing with tag <code>-p</code></h4>
   <img src="assets/listing_pending.gif" alt="Listing with options `-p`">
