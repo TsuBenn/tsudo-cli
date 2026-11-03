@@ -59,7 +59,7 @@ When no options are provided, `tsudo` list will behave according to the current 
 | `-a`, `--all`     | Show all tasks, including hidden ones                            |
 | `-d`, `--detail`  | Show tasks along with their detail if they has one               |
 | `-t`, `--time`    | Show tasks' creation or completion date and time                 |
-| `-p`, `--pending` | Show only pending tasks, this override the `-a`, `-all` behavior |
+| `-p`, `--pending` | Show only pending tasks, this override the `-a`, `--all` behavior |
 
 Multiple options can be used, with the exception that `-p` will override the `-a` behavior.
 
@@ -93,7 +93,7 @@ tsudo add [args]
 # or
 tsudo new [args]
 ```
-Quotes are optional for any thing that are after `add` or `new` as they will be joined together by 1 space.
+Quotes are optional for anything that are after `add` or `new` as they will be joined together by 1 space.
 ```bash
 tsudo add Buy milk and never come back
 # Is the same as
