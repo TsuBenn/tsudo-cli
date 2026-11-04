@@ -291,6 +291,7 @@ tsudo log
   <img src="assets/journal.gif" alt="Using Journal to revert Removal">
 </details>
 
+---
 ### Undoing Changes
 Revert to the previous change.
 ```bash
