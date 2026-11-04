@@ -58,8 +58,7 @@ Description:
     If no description is provided, Tsudo will spin up a inline TUI textfield
     for you to type in the description.
     After description is provided, Tsudo will ask for a tag for the task, the
-    inline TUI will suggest existing tags
-    if the list has any.
+    inline TUI will suggest existing tags if the list has any.
 
 Usage:
     tsudo new [ARGS]
