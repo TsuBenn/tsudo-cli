@@ -5,10 +5,10 @@
 
 ## Features
 - **Project-scoped**: Each project will have its own `.todo` similar to how `.git` works. Preventing bloating the todo list with other project's tasks.
-- **Inline TUI**: Instead of passing in tasks ID to complete, remove or edit, `tsudo` provide a light-weight terminal UI to filter, select tasks seamlessly.
+- **Inline terminal UI**: Instead of passing in tasks ID to complete, remove or edit, `tsudo` provide a light-weight terminal UI to filter, select tasks seamlessly.
 - **Only Tags**: Instead of complex groupings and labeling, `tsudo` only have tags, help simple organizating and grouping tasks as well as track each group's progress.
 - **Compact Listing**: `tsudo` provide some basic features to reduce the amount of tasks shown, prevent distraction from completed task groups.
-- **Journaling**: To prevent mistakes from high-speed productions, `tsudo` snapshot every changes of the todo list so developer can revert to previous versions if they made a destructive mistake.
+- **Journaling**: To prevent mistakes from a high-speed productions, `tsudo` snapshot every change of the todo list so developer can revert to previous versions if they ever make a destructive mistake.
 
 ## Installation
 ### From source
@@ -27,18 +27,18 @@ Please read the [support](#support) section for more information on whether this
 ```bash
 tsudo [command] [args]...
 ```
-| Commands                   | Descriptions                             |
-| ---                        | ---                                      |
-| `list`                     | List tasks                               |
-| `new <desc>`, `add <desc>` | Add a new tasks                          |
-| `complete`, `done`         | Complete task(s)                         |
-| `remove`, `delete`, `rm`   | Remove task(s)                           |
-| `edit`                     | Edit task(s)                             |
-| `config`                   | Configure current project's Tsudo config |
-| `filter`                   | List tasks on a specific tag             |
-| `detail`                   | Select and show task(s) details          |
-| `journal`, `log`           | List changes made to tasks               |
-| `help`, `-h`, `--help`     | Show this message                        |
+| Commands                   | Descriptions                                                     |
+| ---                        | ---                                                              |
+| `list`                     | List tasks                                                       |
+| `new <desc>`, `add <desc>` | Add a new tasks                                                  |
+| `complete`, `done`         | Complete task(s)                                                 |
+| `remove`, `delete`, `rm`   | Remove task(s)                                                   |
+| `edit`                     | Edit task(s)                                                     |
+| `config`                   | Configure current project's [Tsudo config](#tsudo-configuration) |
+| `filter`                   | List tasks on a specific tag                                     |
+| `detail`                   | Select and show task(s) details                                  |
+| `journal`, `log`           | List changes made to tasks                                       |
+| `help`, `-h`, `--help`     | Show this message                                                |
 
 ---
 ### Listing tasks
@@ -52,13 +52,13 @@ tsudo list [options]
 # or
 tsudo      [options]
 ```
-When no options are provided, `tsudo` list will behave according to the current project's Tsudo config. Some of these options are used to temporary override the config's behavior.
+When no options are provided, `tsudo` list will behave according to the current project's [Tsudo config](#tsudo-configuration). Some of these options are used to temporary override the config's behavior.
 
-| Options           | Descriptions                                                     |
-| ---               | ---                                                              |
-| `-a`, `--all`     | Show all tasks, including hidden ones                            |
-| `-d`, `--detail`  | Show tasks along with their detail if they has one               |
-| `-t`, `--time`    | Show tasks' creation or completion date and time                 |
+| Options           | Descriptions                                                      |
+| ---               | ---                                                               |
+| `-a`, `--all`     | Show all tasks, including hidden ones                             |
+| `-d`, `--detail`  | Show tasks along with their detail if they has one                |
+| `-t`, `--time`    | Show tasks' creation or completion date and time                  |
 | `-p`, `--pending` | Show only pending tasks, this override the `-a`, `--all` behavior |
 
 Multiple options can be used, with the exception that `-p` will override the `-a` behavior.
@@ -82,18 +82,16 @@ Multiple options can be used, with the exception that `-p` will override the `-a
 ---
 ### Adding tasks
 - Add a new tasks with a provided description.
-- If no description is provided, `tsudo` will spin up an inline TUI textfield for you to type the description into.
-- After description is provided, `tsudo` will ask for a tag for the task, the inline TUI will suggest existing tags if the list has any. A task's tag can be left blank, though when listed, it would show as `__untagged__:`
-- A task, can also hold detail, which holds a tasks more descriptive details other than the description itself. `new` or `add` by default does not let you add detail on creation to reduce the step of adding a new task, to add detail to a task, check out [editing](#editing-tasks).
-> **Important:**
-> If no `.todo` directory is present in the current directory or any of the parent directory, `tsudo` will ask whether you want to initialize a `.todo` in the current directory.
->
+- If no description is provided, `tsudo` will spin up an inline terminal UI textfield for you to type the description into.
+- After description is provided, `tsudo` will ask for a tag for the task, the inline terminal UI will suggest existing tags if the list has any. A task's tag can be left blank, though when listed, it would show as `__untagged__:`
+- A task can also hold detail, which holds a tasks more descriptive details other than the description itself. `new` or `add` by default does not let you add detail on creation to reduce the step of adding a new task, to add detail to a task, check out [editing](#editing-tasks).
+- If no `.todo` directory is present in the current directory or any of the parent directory, `tsudo` will ask whether you want to initialize a `.todo` in the current directory.
 ```bash
 tsudo add [args]
 # or
 tsudo new [args]
 ```
-Quotes are optional for anything that are after `add` or `new` as they will be joined together by 1 space.
+Quotes are optional for anything that are after `add` or `new`, as they will be joined together by 1 space.
 ```bash
 tsudo add Buy milk and never come back
 # Is the same as
@@ -115,7 +113,7 @@ tsudo complete
 # or
 tsudo done
 ```
-- After accepting the completion status, `tsudo` will print out the whole list, and highlight tasks that have their completion status changed.
+- After accepting the completion status, `tsudo` will print out the whole list, highlighting tasks that have their completion status changed.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
@@ -137,7 +135,7 @@ tsudo delete
 # or
 tsudo rm
 ```
-- After accepting the tasks for removal, `tsudo` while print out the whole list, and highlight tasks that has been removed.
+- After accepting the tasks for removal, `tsudo` while print out the whole list, highlighting tasks that has been removed.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
@@ -159,7 +157,7 @@ tsudo edit
 ```
 - `tsudo` lets you choose one or many tasks for editing.
 - After selecting a task, you can choose to edit a task's description, detail or tag.
-- After selecting multiple tasks, you can only choose to edit their tags.
+- If multiple tasks are selected, you can only choose to edit their tags.
 - A detail of a task is empty on creation by default to reduce the steps of adding a new task. But sometimes, you might want to add more to a task than just its description, so to add detail to a task, `edit` is the way.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
@@ -178,12 +176,12 @@ tsudo edit
 ### Filtering tasks
 List tasks of a specific tag.
 ```bash
-tsudo filter [query]
+tsudo filter [querys]
 ```
-- Query can be left empty and `tsudo` will prompt you a list of tags for you to choose.
+- If query is empty, `tsudo` will prompt you a list of tags for you to choose.
 - If a query is provided, `tsudo` will try its best to find the matching tag and list out the tag's tasks. Else if more than one tags are matched, `tsudo` will prompt you to choose which tag you meant to filter.
 - If no tags matches the query whatsoever, the `tsudo` will behave similar to when you don't provide any query at all.
-- After accepting a tag, `tsudo` behaves like [listing](#listing-tasks) but only printing out the tasks of the tag you've chosen.
+- After accepting a tag or multiple tags, `tsudo` behaves like [listing](#listing-tasks) but only printing out the tasks of the tags you've chosen.
 
 #### Demonstration
 
@@ -204,7 +202,7 @@ Check a tasks detail information.
 tsudo detail
 ```
 - This is different from [listing](#listing-tasks)'s `-d` option.
-- While the `-d` option from [listing](#listing-tasks) list out all of the tasks along with their details shown, this command lets you choose which task to the detail of and print out a more detailed details than the `-d` option of [listing](#listing-tasks).
+- While the `-d` option from [listing](#listing-tasks) list out all of the tasks along with their details shown, this command lets you choose which task to show the detail of and print out a more detailed details than the `-d` option from [listing](#listing-tasks).
 - `tsudo` lets you choose one or many tasks to show the detail of.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
@@ -229,22 +227,24 @@ tsudo config
 
 #### Show Creation/Completion Time of Tasks
 - **Possible value:** `true`/`false`
-- Show tasks creation date and time when [listing](#listing-tasks). When a task is completed, its completion date and time will be shown instead. This option can be temporary overriden to `true` by using the `-t` tag when using [listing](#listing-tasks).
+- Show tasks creation date and time when [listing](#listing-tasks). When a task is completed, its completion date and time will be shown instead.
+- This option can be temporary overriden to `true` by using the `-t` option when using [listing](#listing-tasks).
 #### Show Progress of Task Groups
 - **Possible value:** `true`/`false`
 - Show a task group's progress by how many tasks out of all tasks in that group has been completed as well as a percentage of that tag group's completion
 #### Show Completed Task Range
 - **Possible value:** `Inf`/`0h`/`6h`/`12h`/`24h`/`48h`
-- Instead of showing every tasks everytime, which might lead to the bloating of the list when [listing](#listing-tasks), this option will hide any completed tasks that has been completed for more than the specified hour.
+- Instead of showing all tasks everytime, which might lead to the bloating of the list when [listing](#listing-tasks), this option will hide any completed tasks that has been completed for more than the specified hour.
+- This option can be temporary overriden to `true` by using the `-a` or `-p` option when using [listing](#listing-tasks).
 #### Hide Tasks in Fully Completed Groups
 - **Possible value:** `true`/`false`
 - While the previous option hide those that has been completed for a while, this will hide any tag groups that has the completion status of 100%, help debloating the [listing](#listing-tasks).
-> **Important:**
+- This option can be temporary overriden to `true` by using the `-a` option when using [listing](#listing-tasks).> **Important:**
 > Having this option turned on means the behavior of the selection interface will also be changed. Check the [Control](#controls) -> [Collapsed Group](#collapsed-group) section on how this changes the behavior of the list selection.
 #### Sort Tasks by Completion
 - **Possible value:** `true`/`false`
 - Push any pending tasks to the top when [listing](#listing-tasks), [completing](#completing-tasks), [removing](#removing-tasks) or [editing](#editing-tasks).
-- This will not affect the original order of the todo list. This will only sort the completed tasks within tag groups and does not sort globaly.
+- This will not affect the original order of the todo list.
 
 - For more information on how to navigate the interface, check the [control](#controls) section
 
@@ -271,7 +271,8 @@ List changes made to the todo list.
 tsudo journal
 ```
 - This will list out changes that has been made to the todo list. When selecting a version, it will print out the snapshot of the todo list of that version.
-- You can decide to whether revert to that version or change the viewing options like hiding completed groups, hiding changes or sorting tasks by completion status, overriding the snapshot's config.
+- You can decide to whether revert to that version or not.
+- The files provided by the journaling feature are ignored by git by default, for git to track the snapshots and journal, remove the `.gitignore` in `.todo`.
 > **Important:**
 > As of right now, there's no way you can clean up the snapshots and it will eventually take up quite a lot of space if your list is very long and you make a lot of changes. To clean up, you can always delete files within the `.todo/history` directory. Though you might still see all of the version when running `tsudo journal`, that's because `.todo/journal.jsonl` is the one tracking the changes and points `tsudo` to the right `*.json` within `.todo/history` for you to view or revert to. You don't have to change anything in the `.todo/journal.jsonl` if you don't want to as what important are your recent changes and selecing a version that points to nothing won't hurt anyone either.
 
@@ -314,7 +315,7 @@ Instead of you entering a task ID for [completing](#completing-tasks), [removing
 - `enter` to select a version of changes.
 ##### Collapsed Group:
 - If you have activated the [Hide Tasks in Fully Completed Group](#hide-tasks-in-fully-completed-groups) in the [config](#tsudo_configuration), groups within the task selection interface would colapse the options within the completed groups and will show something like `[-] [8 collapsed items]`.
-- To expand the collapsed groups, you would want to use `space`. By doing so, the filter will be automatically filled with the [Group Filtering](#advanced-filtering) of the selected group and showing only those within that group. You can go back by `esc`, or continue to search within the group by `/` and type.
+- To expand the collapsed groups, you would want to use `space`. You can go back by `esc`, or continue to search within the group by `/` and type.
 - When in *FILTER MODE*, the collapsed groups will be automatically expanded out for searching.
 <details>
   <summary>Demonstrations</summary>
