@@ -94,7 +94,7 @@ pub enum Command {
         time: bool,
         pending: bool,
     },
-    Filter(String),
+    Filter(Vec<String>),
     Detail,
     New(String),
     Remove,

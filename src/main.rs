@@ -14,7 +14,7 @@ fn run(args: Vec<String>, todo_list: Result<TodoList, TodoFindError>) -> Result<
             pending,
         } => Ok(cli::list(todo_list, all, detail, time, pending)),
         Command::New(description) => cli::new(todo_list, description),
-        Command::Filter(input_tag) => cli::filter(todo_list, input_tag),
+        Command::Filter(input_tags) => cli::filter(todo_list, input_tags),
         Command::Complete => cli::complete(todo_list),
         Command::Edit => cli::edit(todo_list),
         Command::Remove => cli::remove(todo_list),

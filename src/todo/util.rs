@@ -92,7 +92,7 @@ pub fn get_command(args: Vec<String>) -> Command {
             while let Some(arg) = args.next() {
                 query.push(arg);
             }
-            return Command::Filter(query.join(" "));
+            return Command::Filter(query);
         }
         "detail" => return Command::Detail,
         "help" | "-h" | "--help" => return Command::Help(args.next()),

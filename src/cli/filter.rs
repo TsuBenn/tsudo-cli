@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crossterm::style::Stylize;
 use fuzzy_matcher::{
     FuzzyMatcher,
@@ -13,7 +15,7 @@ use tsudo::tui::*;
 
 fn match_tags(tag: &str, query: &str) -> bool {
     if tag.is_empty() {
-        return false
+        return false;
     }
     let tag = tag.trim().to_lowercase();
 
@@ -55,46 +57,76 @@ fn match_tags(tag: &str, query: &str) -> bool {
 
 pub fn todo_filter(
     todo_list: Result<TodoList, TodoFindError>,
-    input_tag: String,
+    input_tags: Vec<String>,
 ) -> Result<(), i32> {
     if let Ok(mut todo_list) = todo_list {
         let mut tags = todo_list.get_tags();
-        if !input_tag.is_empty() {
-            tags = tags
-                .into_iter()
-                .filter(|t| match_tags(t, &input_tag.trim().to_lowercase()))
-                .collect();
-        }
-        let tag;
-        if tags.len() == 1 {
-            tag = tags[0].clone()
-        } else {
-            if tags.is_empty() {
-                eprintln!(
-                    "\n{}\n",
-                    format!("  No Tag of '{}' found.", input_tag).bold().red()
-                );
-                tags = todo_list.get_tags();
+        let mut hit = HashSet::new();
+        let mut misses = HashSet::new();
+        if !input_tags.is_empty() {
+            for input in input_tags {
+                let matched_tags: Vec<usize> = tags
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, tag)| {
+                        if match_tags(&tag, &input) {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if matched_tags.is_empty() {
+                    continue;
+                }
+                if matched_tags.len() == 1 {
+                    hit.insert(*matched_tags.get(0).unwrap());
+                } else {
+                    for miss in matched_tags {
+                        misses.insert(miss);
+                    }
+                }
             }
+        }
+        let tag: Vec<String>;
+        if !hit.is_empty() && misses.is_empty() {
+            tag = tags
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, item)| if hit.contains(&i) { Some(item) } else { None })
+                .collect();
+        } else if hit.is_empty() && misses.is_empty() {
+            eprintln!("\n  No Tags of found.\n",);
+            tag = tags;
+        } else {
+            let matched_tags: Vec<(usize, String)> = tags.into_iter().enumerate().filter(|(i,_)| hit.contains(&i) || misses.contains(&i)).collect();
             let mut tag_select = Select::<String>::new("Enter Tag filter", |i| {
                 if i.is_empty() {
                     "__untagged__".to_string()
                 } else {
                     i.clone()
                 }
-            });
-            tag_select.add_items(tags.as_mut_slice(), None);
+            })
+            .with_multi_selection(true)
+            .with_hybrid(true)
+            .with_initial_selection(matched_tags.iter().filter_map(|(i, _)| if hit.contains(&i) {Some(i.clone())} else {None}).collect());
+            tags = matched_tags.into_iter().map(|(_, item)| item).collect();
+            tag_select.add_items(&mut tags, None);
             let result = tag_select
                 .prompt()
                 .map_err(|err| handle_ui_error(err, ""))?;
-            tag = result.selected[0].1.clone();
+            tag = result
+                .selected
+                .into_iter()
+                .map(|(_, tag)| tag.clone())
+                .collect();
         }
         todo_list.config.show_completed_range = None;
         todo_list.config.hide_completed_groups = false;
         if todo_list.config.sort_by_completion {
             todo_list.items.sort_by_key(|i| i.done);
         }
-        todo_list.items.retain(|i| i.tag == tag);
+        todo_list.items.retain(|i| tag.contains(&i.tag));
         todo_list.print();
     }
 

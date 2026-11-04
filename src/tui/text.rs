@@ -2,14 +2,11 @@ use std::io::{Write, stdout};
 
 use crate::tui::util::*;
 use crossterm::{
-    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveToRow, MoveUp},
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    style::{
+    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveToRow, MoveUp}, event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags}, style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
         Stylize,
-    },
-    terminal::{self, ScrollUp},
+    }, terminal::{self, ScrollUp, supports_keyboard_enhancement},
 };
 use textwrap::Options;
 
@@ -218,8 +215,10 @@ impl<'a> Text<'a> {
         let mut invalid_message = String::new();
 
         crossterm::terminal::enable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
-        crossterm::execute!(stdout, cursor::SetCursorStyle::BlinkingBar)
-            .map_err(|e| UIError::Terminal(e.to_string()))?;
+        crossterm::execute!(stdout,
+            cursor::SetCursorStyle::BlinkingBar,
+        )
+        .map_err(|e| UIError::Terminal(e.to_string()))?;
 
         let mut is_selecting_suggestion = false;
         let mut selected_suggestion: i64 = 0;
@@ -241,7 +240,7 @@ impl<'a> Text<'a> {
         };
 
         let mut cursor_x;
-        let mut cursor_y = 1;
+        let mut cursor_y;
         let mut cursor_accumulate;
 
         loop {
@@ -250,11 +249,6 @@ impl<'a> Text<'a> {
             } else {
                 self.match_suggestion(&text)
             };
-
-            if cursor_y > 1 {
-                crossterm::queue!(stdout, MoveUp(cursor_y - 1))
-                    .map_err(|e| UIError::Terminal(e.to_string()))?;
-            }
 
             let prompt_len = render_prompt(
                 &mut stdout,
@@ -287,11 +281,11 @@ impl<'a> Text<'a> {
                     .map_err(|e| UIError::Terminal(e.to_string()))?;
             }
 
-            for line in wrapped_text.lines() {
+            for line in wrapped_text.split("\n") {
                 if cursor_accumulate < cursor {
                     cursor_y += 1;
                     cursor_x = line.len().min(cursor - cursor_accumulate);
-                    cursor_accumulate += cursor_x
+                    cursor_accumulate += cursor_x;
                 }
                 crossterm::queue!(
                     stdout,
@@ -471,6 +465,11 @@ impl<'a> Text<'a> {
             }
 
             stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
+
+            if cursor_y > 1 {
+                crossterm::queue!(stdout, MoveUp(cursor_y - 1))
+                    .map_err(|e| UIError::Terminal(e.to_string()))?;
+            }
 
             if let Event::Key(key_event) =
                 event::read().map_err(|e| UIError::Terminal(e.to_string()))?

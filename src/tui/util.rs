@@ -1,14 +1,13 @@
 use std::io::{Stdout, Write, stdout};
 
 use crossterm::{
-    cursor::{self, MoveToColumn, MoveUp},
-    style::{
+    cursor::{self, MoveDown, MoveToColumn, MoveUp}, event::PopKeyboardEnhancementFlags, style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetForegroundColor,
         Stylize,
-    },
-    terminal::{self, Clear},
+    }, terminal::{self, Clear},
 };
+use textwrap::Options;
 
 #[derive(Debug)]
 pub enum UIError {
@@ -63,6 +62,7 @@ pub fn render_prompt(
         _ => String::new(),
     };
     let prompt = format!("{} {}{}: ", "?".to_string().green(), &message, &hint);
+    let wrapped_text = textwrap::fill(text, 80);
     crossterm::queue!(
         stdout,
         MoveToColumn(0),
@@ -75,22 +75,35 @@ pub fn render_prompt(
             None => Attributes::default(),
         }),
         SetForegroundColor(color),
-        Print(format!("{}{}", text, if new_line { "\n" } else { "" })),
-        MoveToColumn(0),
-        ResetColor,
     )
     .map_err(|e| UIError::Terminal(e.to_string()))?;
+
+    for line in wrapped_text.lines() {
+        crossterm::queue!(
+            stdout,
+            Print(line),
+            MoveDown(1),
+            MoveToColumn((message.len() + hint.len() + 4) as u16),
+        )
+        .map_err(|e| UIError::Terminal(e.to_string()))?;
+    }
+
+    if !new_line && !wrapped_text.is_empty() {
+        crossterm::queue!(stdout, MoveUp(1)).map_err(|e| UIError::Terminal(e.to_string()))?;
+    }
+
+    crossterm::queue!(stdout, MoveToColumn(0), ResetColor,)
+        .map_err(|e| UIError::Terminal(e.to_string()))?;
     Ok(strip_ansi_escapes::strip_str(&prompt).len())
 }
 
 pub fn cleanup_terminal(stdout: &mut Stdout, report_cancel: bool) -> Result<(), UIError> {
-
     stdout.flush().map_err(|e| UIError::Other(e.to_string()))?;
 
     crossterm::execute!(
         stdout,
         cursor::Show,
-        cursor::SetCursorStyle::DefaultUserShape
+        cursor::SetCursorStyle::DefaultUserShape,
     )
     .map_err(|e| UIError::Terminal(e.to_string()))?;
     crossterm::terminal::disable_raw_mode().map_err(|e| UIError::Terminal(e.to_string()))?;
