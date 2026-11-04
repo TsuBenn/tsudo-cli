@@ -1,5 +1,7 @@
 # tsudo
-`tsudo` is a light-weight, project-scoped CLI Task Manager built in Rust. The name `tsudo` comes from the combination of my name `TsuBenn` and `todo`.
+- `tsudo` is a light-weight, project-scoped CLI Task Manager built in Rust.
+- The name `tsudo` comes from the combination of my name `TsuBenn` and `todo`.
+- If you find `tsudo` annoying to type, feel free alias it to your liking.
 
 ![tsudo demo](assets/demo.gif)
 
