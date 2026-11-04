@@ -74,6 +74,7 @@ pub enum TodoAction {
         new: TodoListConfig,
     },
     Revert(u64),
+    Init,
 }
 
 #[derive(Debug)]
@@ -101,6 +102,7 @@ pub enum Command {
     Complete,
     Edit,
     Journal,
+    Undo,
     Config,
     Help(Option<String>),
     Unknown(String),

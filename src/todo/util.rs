@@ -6,10 +6,8 @@ use std::{
 
 use crate::todo::{
     help_texts::{
-        COMPLETE_HELP, CONFIG_HELP, DETAIL_HELP, EDIT_HELP, FILTER_HELP, GENERAL_HELP,
-        JOURNAL_HELP, LIST_HELP, NEW_HELP, REMOVE_HELP,
-    },
-    models::{Command, TodoFindError, TodoList},
+        COMPLETE_HELP, CONFIG_HELP, DETAIL_HELP, EDIT_HELP, FILTER_HELP, GENERAL_HELP, JOURNAL_HELP, LIST_HELP, NEW_HELP, REMOVE_HELP, UNDO_HELP,
+    }, models::{Command, TodoFindError, TodoList},
 };
 
 pub const DIR: &'static str = ".todo";
@@ -51,6 +49,7 @@ pub fn print_help(cmd: Option<String>) {
             "detail" => text = DETAIL_HELP,
             "help" | "-h" | "--help" => text = GENERAL_HELP,
             "journal" | "log" => text = JOURNAL_HELP,
+            "undo" => text = UNDO_HELP,
             _ => {
                 eprintln!(
                     "\n  Error: No such command `{cmd}`\n  Try --help to see the available commands\n"
@@ -97,6 +96,7 @@ pub fn get_command(args: Vec<String>) -> Command {
         "detail" => return Command::Detail,
         "help" | "-h" | "--help" => return Command::Help(args.next()),
         "journal" | "log" => return Command::Journal,
+        "undo" => return Command::Undo,
         arg => {
             let mut arg = arg.to_owned();
             let mut all = false;
@@ -149,6 +149,9 @@ pub fn find_todo_list() -> Result<TodoList, TodoFindError> {
                 match fs::read_to_string(&file_path) {
                     Ok(content) => match serde_json::from_str::<TodoList>(&content) {
                         Ok(mut todo_list) => {
+                            if !dir_path.join(JOURNAL).is_file() {
+                                todo_list.save(super::TodoAction::Init).map_err(|_| TodoFindError::Other("Can't initialize Journal".to_string()))?;
+                            }
                             todo_list.path = dir_path.into_os_string();
                             todo_list.sort();
                             return Ok(todo_list);

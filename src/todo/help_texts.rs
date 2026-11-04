@@ -13,6 +13,7 @@ Command:
     filter                 List tasks on a specific tag
     detail                 Select and show task(s) details
     journal, log           List changes made to tasks
+    undo                   Revert to the previous change
     help, -h, --help       Show this message
 
 See 'tsudo help <command>' for more information on a specific command
@@ -368,7 +369,7 @@ Description:
     tasks by completion status.
 
 Usage:
-    tsudo config
+    tsudo journal
 
 Control:
     Basics:
@@ -382,6 +383,26 @@ Examples:
     1. Spin up inline TUI for changing config:
 
         tsudo config
+
+"#;
+
+pub const UNDO_HELP: &'static str = r#"
+tsudo undo
+
+Description:
+    Revert to the previous change.
+    This is an automated version of 'tsudo journal', instead of going
+    through the list just to revert 1 version back, 'undo' would
+    automatically do that for you.
+
+
+Usage:
+    tsudo undo
+
+Examples:
+    1. Revert to the previous change:
+
+        tsudo undo
 
 "#;
 

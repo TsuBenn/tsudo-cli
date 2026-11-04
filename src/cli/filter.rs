@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crossterm::style::Stylize;
 use fuzzy_matcher::{
     FuzzyMatcher,
     skim::{SkimMatcherV2, SkimScoreConfig},

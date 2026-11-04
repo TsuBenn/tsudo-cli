@@ -40,6 +40,7 @@ tsudo [command] [args]...
 | `filter`                   | List tasks on a specific tag                                     |
 | `detail`                   | Select and show task(s) details                                  |
 | `journal`, `log`           | List changes made to tasks                                       |
+| `undo`                     | Revert to previous change                                        |
 | `help`, `-h`, `--help`     | Show this message                                                |
 
 ---
@@ -271,6 +272,8 @@ tsudo config
 List changes made to the todo list.
 ```bash
 tsudo journal
+# or
+tsudo log
 ```
 - This will list out changes that has been made to the todo list. When selecting a version, it will print out the snapshot of the todo list of that version.
 - You can decide to whether revert to that version or not.
@@ -287,6 +290,14 @@ tsudo journal
   <h4>Using Journal to revert Removal</h4>
   <img src="assets/journal.gif" alt="Using Journal to revert Removal">
 </details>
+
+### Undoing Changes
+Revert to the previous change.
+```bash
+tsudo undo
+```
+> `undo` is an automated version of `journal`.
+> Instead of going through the [journal](#journaling-changes) list just to revert 1 version back, `undo` would automatically do that for you.
 
 ---
 ### Controls

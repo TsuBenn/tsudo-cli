@@ -52,7 +52,8 @@ fn run(args: Vec<String>) -> Result<(), i32> {
             );
             Err(1)
         }
-        Command::Journal => cli::journal(todo_list),
+        Command::Journal => cli::journal(todo_list, false),
+        Command::Undo => cli::journal(todo_list, true),
         _ => Err(1)
     }
 }

@@ -14,7 +14,7 @@ use tsudo::tui::*;
 
 use crossterm::style::{Attribute, Attributes};
 
-pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> {
+pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>, undo: bool) -> Result<(), i32> {
     if let Ok(mut todo_list) = todo_list {
         let base_path = Path::new(&todo_list.path);
         let journal_file = base_path.join(JOURNAL).into_os_string();
@@ -53,16 +53,26 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
             return Err(1);
         }
 
+        if journals.len() == 1 {
+            eprintln!("\n  Can't undo, already at the oldest change!\n");
+            return Err(1);
+        }
+
         let mut initial_journal_selected = 0;
-        let mut auto_select_journal = None;
+        let mut auto_select_journal = if undo { Some(1) } else { None };
         let mut hide_completed_groups = None;
         let mut show_changes = true;
         let mut sort_by_completion = None;
         let mut initial_option_selected = 0;
 
         loop {
-            let mut journal_select =
-                Select::<TodoJournal>::new("Select a Journal to inspect", |j| {
+            let mut journal_select = Select::<TodoJournal>::new(
+                if undo {
+                    "Undo to previous change"
+                } else {
+                    "Select a Journal to inspect"
+                },
+                |j| {
                     let mut time_string = "!err!".to_string();
                     if let Some(date_time) = DateTime::from_timestamp_millis(j.timestamp as i64) {
                         let local: DateTime<Local> = DateTime::from(date_time);
@@ -163,12 +173,16 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                         TodoAction::Revert(timestamp) => {
                             action_string = format!("Reverted back to {}", timestamp);
                         }
+                        TodoAction::Init => {
+                            action_string = format!("Journal initialized");
+                        }
                     }
 
                     format!("{} [{}] {}", j.timestamp, time_string, action_string)
-                })
-                .with_page_size(PAGE_SIZE.min(journals.len()))
-                .with_initial_position(initial_journal_selected);
+                },
+            )
+            .with_page_size(PAGE_SIZE.min(journals.len()))
+            .with_initial_position(initial_journal_selected);
             if let Some(auto_select) = auto_select_journal {
                 journal_select = journal_select.with_auto_select(auto_select);
                 auto_select_journal = None;
@@ -252,13 +266,13 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                                     Some(Color::Yellow),
                                     Some(Attributes::default().with(Attribute::Bold)),
                                 ),
-                                TodoAction::Config { old: _, new: _ } | TodoAction::Revert(_) => {
-                                    snapshot.print()
-                                }
+                                TodoAction::Config { old: _, new: _ }
+                                | TodoAction::Revert(_)
+                                | TodoAction::Init => snapshot.print(),
                             }
                         } else {
                             snapshot.print()
-                        };
+                        } + 1;
                         let mut option_select =
                             Select::<String>::new("Revert to this version?", |i| i.clone())
                                 .with_initial_position(initial_option_selected);
@@ -281,6 +295,9 @@ pub fn todo_journal(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i3
                             },
                         ];
                         option_select.add_items(&mut options, None);
+                        if undo {
+                            option_select = option_select.with_auto_select(0)
+                        }
 
                         match option_select.prompt() {
                             Ok(result) => match result.index() {

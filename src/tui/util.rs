@@ -1,13 +1,12 @@
 use std::io::{Stdout, Write, stdout};
 
 use crossterm::{
-    cursor::{self, MoveDown, MoveToColumn, MoveUp}, event::PopKeyboardEnhancementFlags, style::{
+    cursor::{self, MoveDown, MoveToColumn, MoveUp}, style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetAttributes, SetForegroundColor,
         Stylize,
     }, terminal::{self, Clear},
 };
-use textwrap::Options;
 
 #[derive(Debug)]
 pub enum UIError {

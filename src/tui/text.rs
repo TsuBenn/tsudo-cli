@@ -2,11 +2,11 @@ use std::io::{Write, stdout};
 
 use crate::tui::util::*;
 use crossterm::{
-    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveToRow, MoveUp}, event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags}, style::{
+    cursor::{self, MoveDown, MoveToColumn, MoveToNextLine, MoveToRow, MoveUp}, event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers}, style::{
         Attribute::{self},
         Attributes, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
         Stylize,
-    }, terminal::{self, ScrollUp, supports_keyboard_enhancement},
+    }, terminal::{self, ScrollUp},
 };
 use textwrap::Options;
 
