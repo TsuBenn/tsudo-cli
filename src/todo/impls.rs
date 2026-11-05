@@ -6,11 +6,7 @@ use crossterm::{
     },
 };
 use std::{
-    collections::HashSet,
-    fs::{self, OpenOptions},
-    io::stdout,
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    collections::HashSet, fs::{self, OpenOptions}, io::stdout, path::Path, thread, time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use std::io::Write;
@@ -65,6 +61,7 @@ impl TodoList {
     pub fn add(&mut self, description: String, tag: String) -> u64 {
         let item = TodoItem::new(description, tag);
         let timestamp = item.timestamp;
+        thread::sleep(Duration::from_millis(1));
         self.items.push(item);
         self.sort();
         timestamp
