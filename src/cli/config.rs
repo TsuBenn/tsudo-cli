@@ -37,6 +37,10 @@ pub fn todo_config(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32
                     "{:<8} Sort tasks by completion",
                     format!("[{}]", todo_list.config.sort_by_completion)
                 ),
+                format!(
+                    "{:<8} Clear screen",
+                    format!("[{}]", todo_list.config.clear_screen)
+                ),
             ];
             option_select.add_items(&mut options, None);
             match option_select.prompt() {
@@ -77,6 +81,12 @@ pub fn todo_config(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32
                     4 => {
                         todo_list.config.sort_by_completion = !todo_list.config.sort_by_completion;
                         initial_selection = 4;
+                        clean_line_once();
+                        continue;
+                    }
+                    5 => {
+                        todo_list.config.clear_screen = !todo_list.config.clear_screen;
+                        initial_selection = 5;
                         clean_line_once();
                         continue;
                     }

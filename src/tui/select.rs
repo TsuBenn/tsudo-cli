@@ -341,12 +341,14 @@ impl<'a, T> Select<'a, T> {
             .enumerate()
             .filter_map(|(i, item)| {
                 let match_filter = self.match_filter(item, &filter);
-                if (filtered_items.contains(&i) && filter.is_empty()) || (!filter.is_empty() && match_filter) {
+                if (filtered_items.contains(&i) && filter.is_empty())
+                    || (!filter.is_empty() && match_filter)
+                {
                     Some(i)
                 } else {
                     None
                 }
-                })
+            })
             .collect();
 
         if let Some(sorter) = self.sorter {
@@ -365,6 +367,7 @@ impl<'a, T> Select<'a, T> {
         let mut page_ranges: Vec<Range<usize>> = Vec::new();
         let base_group_count = self.count_group(self.items.iter().map(|i| i).collect());
         let mut direction = 0;
+        let mut changed = false;
 
         let filtered_items = self.get_filtered_items();
 
@@ -457,8 +460,11 @@ impl<'a, T> Select<'a, T> {
                 continue;
             }
 
-            let selected_item_index =
-                *items.get(page_ranges.get(page_index).unwrap_or(&(0..0)).clone()).unwrap_or(&[]).get(selected_index as usize).unwrap_or(&0);
+            let selected_item_index = *items
+                .get(page_ranges.get(page_index).unwrap_or(&(0..0)).clone())
+                .unwrap_or(&[])
+                .get(selected_index as usize)
+                .unwrap_or(&0);
 
             direction = 0;
 
@@ -693,8 +699,8 @@ impl<'a, T> Select<'a, T> {
                             continue;
                         }
                         if filter.is_empty()
-                            && self.multi_selection
-                            && (self.hybrid || self.select_on_enter)
+                            && (!self.multi_selection
+                            || ((self.hybrid && selected_indices.is_empty()) || (self.select_on_enter && !changed)))
                         {
                             let item = &self.items[selected_item_index];
                             if item.collapsed {
@@ -720,10 +726,16 @@ impl<'a, T> Select<'a, T> {
                             filter_mode = false;
                             continue;
                         }
-                        if !self.multi_selection
-                            || ((self.select_on_enter || self.hybrid)
-                                && selected_indices.is_empty())
+                        if self.multi_selection
+                            && !(self.hybrid && selected_indices.is_empty())
+                            && self.select_on_enter && !changed
                         {
+                            if selected_indices.contains(&selected_item_index) {
+                                selected_indices.remove(&selected_item_index);
+                            } else {
+                                selected_indices.insert(selected_item_index);
+                            }
+                        } else {
                             selected_indices.clear();
                             selected_indices.insert(selected_item_index);
                         }
@@ -833,6 +845,7 @@ impl<'a, T> Select<'a, T> {
                                 continue;
                             }
                             let to_toggle = selected_item_index;
+                            changed = true;
                             if selected_indices.contains(&to_toggle) {
                                 selected_indices.remove(&to_toggle);
                             } else {

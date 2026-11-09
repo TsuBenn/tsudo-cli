@@ -15,7 +15,11 @@ pub struct TodoListConfig {
     pub hide_completed_groups: bool,
     pub show_details: bool,
     pub sort_by_completion: bool,
+    #[serde(default = "default_clear_screen")]
+    pub clear_screen: bool,
 }
+
+fn default_clear_screen() -> bool {false}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TodoItem {
