@@ -1,7 +1,9 @@
-use std::{env, process};
+use std::{env, io::stdout, process};
 
 mod cli;
 mod todo;
+
+use crossterm::{cursor, execute, terminal::Clear};
 
 use crate::todo::{Command, TodoFindError, find_todo_list, get_command};
 
@@ -15,7 +17,16 @@ fn run(args: Vec<String>) -> Result<(), i32> {
     }
 
     let todo_list = match find_todo_list() {
-        Ok(todo_list) => Ok(todo_list),
+        Ok(todo_list) => {
+            if todo_list.config.clear_screen {
+                execute!(
+                    stdout(),
+                    Clear(crossterm::terminal::ClearType::All),
+                    cursor::MoveTo(0,1)
+                ).map_err(|_| {eprintln!("\n  Something went wrong while clearing the terminal screen"); 1})?;
+            }
+            Ok(todo_list)
+        },
         Err(err) => {
             match &err {
                 TodoFindError::NotFound => {

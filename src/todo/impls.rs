@@ -24,6 +24,7 @@ fn default_config() -> TodoListConfig {
         hide_completed_groups: true,
         show_details: false,
         sort_by_completion: false,
+        clear_screen: false,
     }
 }
 

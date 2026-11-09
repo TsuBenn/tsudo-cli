@@ -29,6 +29,7 @@ pub fn todo_complete(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i
                     vec![]
                 })
                 .with_page_size(PAGE_SIZE)
+                .with_select_on_enter(true)
                 .with_initial_selection(
                     todo_list
                         .items

@@ -271,7 +271,7 @@ impl<'a> Text<'a> {
                     Options::new(self.max_width.min(tw - 1) as usize).preserve_trailing_space(true),
                 )
             };
-            let text_lines = wrapped_text.lines().count();
+            let text_lines = wrapped_text.split("\n").count();
             cursor_x = 0;
             cursor_y = 0;
             cursor_accumulate = 0;
@@ -524,6 +524,9 @@ impl<'a> Text<'a> {
                                     true,
                                 )?;
                                 cleanup_terminal(&mut stdout, true)?;
+                            } else if c == 'k' {
+                                Text::type_char(&mut cursor, &mut text, '\n');
+                                continue
                             }
                         }
                         apply_suggestion(
