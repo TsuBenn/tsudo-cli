@@ -621,10 +621,12 @@ impl<'a, T> Select<'a, T> {
                 let show_check_box = self.multi_selection
                     && (!self.hybrid || (self.hybrid && selected_indices.len() > 0));
                 let item_string_formatted = if item.collapsed && filter.is_empty() {
+                    let count = self.items.iter().filter(|it| it.group == item.group).count();
+                    let selected_count = self.items.iter().enumerate().filter(|(i, it)| it.group == item.group && selected_indices.contains(&i)).count();
                     format!(
                         "{}[{} collapsed items]",
                         if show_check_box {
-                            format!("[-] ")
+                            format!("[{}/{}] ", selected_count, count)
                         } else {
                             String::new()
                         },
@@ -700,7 +702,8 @@ impl<'a, T> Select<'a, T> {
                         }
                         if filter.is_empty()
                             && (!self.multi_selection
-                            || ((self.hybrid && selected_indices.is_empty()) || (self.select_on_enter && !changed)))
+                                || ((self.hybrid && selected_indices.is_empty())
+                                    || (self.select_on_enter && !changed)))
                         {
                             let item = &self.items[selected_item_index];
                             if item.collapsed {
@@ -726,16 +729,15 @@ impl<'a, T> Select<'a, T> {
                             filter_mode = false;
                             continue;
                         }
-                        if self.multi_selection
-                            && !(self.hybrid && selected_indices.is_empty())
-                            && self.select_on_enter && !changed
-                        {
-                            if selected_indices.contains(&selected_item_index) {
-                                selected_indices.remove(&selected_item_index);
-                            } else {
-                                selected_indices.insert(selected_item_index);
+                        if self.multi_selection && !(self.hybrid && selected_indices.is_empty()) {
+                            if self.select_on_enter && !changed {
+                                if selected_indices.contains(&selected_item_index) {
+                                    selected_indices.remove(&selected_item_index);
+                                } else {
+                                    selected_indices.insert(selected_item_index);
+                                }
                             }
-                        } else {
+                        } else if !self.multi_selection || (self.hybrid && selected_indices.is_empty()) {
                             selected_indices.clear();
                             selected_indices.insert(selected_item_index);
                         }
