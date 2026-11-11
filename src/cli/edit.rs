@@ -161,6 +161,7 @@ pub fn todo_edit(todo_list: Result<TodoList, TodoFindError>) -> Result<(), i32> 
                                     } else {
                                         let selected = task_result.data_mut();
                                         selected.tag = new.clone();
+                                        edited_item_clone.push(selected.clone());
                                     }
                                     new_tag = Some(new.clone());
                                 }
