@@ -97,8 +97,8 @@ impl<'a> Text<'a> {
         let end = *cursor;
         let mut in_word = true;
         for (i, c) in text.chars().rev().enumerate() {
-            if text.len() - i < *cursor {
-                if !c.is_whitespace() {
+            if text.len() - i <= *cursor {
+                if !c.is_whitespace() && c != '-' && c != '.' && c != '/' {
                     if in_word {
                         continue;
                     } else {
@@ -163,7 +163,7 @@ impl<'a> Text<'a> {
             let mut in_word = true;
             for (i, c) in (*text).chars().rev().enumerate() {
                 if text.len() - i <= *cursor {
-                    if !c.is_whitespace() {
+                    if !c.is_whitespace() && c != '-' && c != '.' && c != '/'  {
                         if in_word {
                             continue;
                         } else {
@@ -188,7 +188,7 @@ impl<'a> Text<'a> {
             let mut in_word = true;
             for (i, c) in text.chars().enumerate() {
                 if i >= *cursor {
-                    if !c.is_whitespace() {
+                    if !c.is_whitespace() && c != '-' && c != '.' && c != '/' {
                         if in_word {
                             continue;
                         } else {
